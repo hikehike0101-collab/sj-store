@@ -327,3 +327,130 @@ window.confirmInstProfit = function confirmInstProfit() {
 document.addEventListener('DOMContentLoaded', () => {
   refreshDashboardPasswordUI();
 });
+
+function hasProtectedDeletionPassword() {
+  return !!dashboardPasswordValue();
+}
+
+function runDeleteConfirmFlow() {
+  showConfirm(
+    window._deleteConfirmTitle || 'تأكيد الحذف',
+    window._deleteConfirmMsg || 'هل أنت متأكد؟',
+    () => {
+      if (window._deletePendingAction) {
+        window._deletePendingAction();
+        window._deletePendingAction = null;
+      }
+    },
+    '🗑️'
+  );
+}
+
+window.openDeletePwd = function openDeletePwd(pwdTitle, pwdMsg, confirmTitle, confirmMsg, action) {
+  window._deletePendingAction = action;
+  window._deleteConfirmTitle = confirmTitle;
+  window._deleteConfirmMsg = confirmMsg;
+
+  if (!hasProtectedDeletionPassword()) {
+    runDeleteConfirmFlow();
+    return;
+  }
+
+  const title = document.getElementById('del-pwd-title');
+  const msg = document.getElementById('del-pwd-msg');
+  const input = document.getElementById('del-pwd-input');
+  const error = document.getElementById('del-pwd-error');
+  const ov = document.getElementById('del-pwd-ov');
+  const box = document.getElementById('del-pwd-box');
+
+  if (title) title.textContent = pwdTitle;
+  if (msg) msg.textContent = pwdMsg;
+  if (input) input.value = '';
+  if (error) error.style.display = 'none';
+  if (ov) {
+    ov.style.opacity = '1';
+    ov.style.pointerEvents = 'all';
+  }
+  if (box) box.style.transform = 'translateY(0) scale(1)';
+  setTimeout(() => input?.focus(), 200);
+};
+
+window.confirmDeletePwd = function confirmDeletePwd() {
+  const input = document.getElementById('del-pwd-input');
+  const error = document.getElementById('del-pwd-error');
+
+  if (input?.value === dashboardPasswordValue()) {
+    closeDeletePwd();
+    setTimeout(() => runDeleteConfirmFlow(), 300);
+    return;
+  }
+
+  if (error) error.style.display = 'block';
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
+  setTimeout(() => {
+    if (error) error.style.display = 'none';
+  }, 2500);
+};
+
+window.deletePageData = function deletePageData(page) {
+  const pageNames = {
+    inventory: 'إدارة المخزون',
+    installments: 'بيانات التقسيط',
+    debts: 'سجل الديون',
+    repairs: 'تصليح الأعطال',
+  };
+  const name = pageNames[page] || page;
+
+  const execMap = {
+    inventory: {
+      col: 'products',
+      key: 'sj_products',
+      render: () => renderInventory(),
+    },
+    installments: {
+      col: 'installments',
+      key: 'sj_installments',
+      render: () => renderInstallments(),
+    },
+    debts: {
+      col: 'debts',
+      key: 'sj_debts',
+      render: () => renderDebts(),
+    },
+    repairs: {
+      col: 'repairs',
+      key: 'sj_repairs',
+      render: () => renderRepairs(),
+    },
+  };
+
+  const runDelete = async () => {
+    const cfg = execMap[page];
+    if (!cfg) return;
+
+    localStorage.removeItem(cfg.key);
+    try { DB.clear(cfg.col); } catch (e) {}
+    await clearFirestoreCollection(cfg.col);
+    cfg.render();
+    toast(`✅ تم حذف بيانات ${name} بنجاح`);
+  };
+
+  if (page === 'repairs') {
+    window._deletePendingAction = runDelete;
+    window._deleteConfirmTitle = `🗑️ تأكيد حذف بيانات ${name}`;
+    window._deleteConfirmMsg = `هل أنت متأكد من حذف جميع بيانات "${name}" نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.`;
+    runDeleteConfirmFlow();
+    return;
+  }
+
+  window.openDeletePwd(
+    '🔒 تأكيد الهوية',
+    `أدخل كلمة السر لحذف بيانات "${name}"`,
+    `🗑️ تأكيد حذف بيانات ${name}`,
+    `هل أنت متأكد من حذف جميع بيانات "${name}" نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.`,
+    runDelete
+  );
+};
