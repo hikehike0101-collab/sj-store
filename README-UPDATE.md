@@ -58,10 +58,10 @@
 
 ```bash
 git add .
-git commit -m "Update app to v1.0.1"
+git commit -m "Update app to v1.0.3"
 git push origin main
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
 ## معنى هذه الأوامر

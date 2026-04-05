@@ -70,17 +70,30 @@ function saveKapaProduct() {
   let barcode   = document.getElementById('kapa-barcode').value.trim();
   const color   = document.getElementById('kapa-color').value.trim();
   const note    = '';
+  const prods = DB.get('products');
+  const currentProd = _kapaEditId ? prods.find(p => p.id === _kapaEditId) : null;
 
     if (!name)  { toast('أدخل اسم الهاتف', 'err'); return; }
     if (!price) { toast('أدخل سعر البيع', 'err'); return; }
 
-  if (!barcode) barcode = gen13Barcode();
-  barcode = normalizeProductBarcode(barcode);
+  if (_kapaEditId && currentProd) {
+    if (!barcode) barcode = currentProd.barcode || gen13Barcode();
+    else if (barcode !== String(currentProd.barcode || '').trim()) {
+      const normalized = normalizeProductBarcode(barcode);
+      if(!normalized.ok){ toast(normalized.error, 'err'); return; }
+      barcode = normalized.barcode;
+    }
+  } else {
+    if (!barcode) barcode = gen13Barcode();
+    else {
+      const normalized = normalizeProductBarcode(barcode);
+      if(!normalized.ok){ toast(normalized.error, 'err'); return; }
+      barcode = normalized.barcode;
+    }
+  }
 
   // Build desc from specs
   const specs = [ram, storage, battery, color].filter(Boolean).join(' | ');
-
-  const prods = DB.get('products');
 
   if (_kapaEditId) {
     const idx = prods.findIndex(p => p.id === _kapaEditId);
@@ -147,7 +160,20 @@ function genRandomEan8(){
 }
 
 function normalizeProductBarcode(value){
-  return toPrintableEan8(value);
+  const digits = String(value || '').replace(/\D/g, '');
+  if(!digits) return { ok:true, barcode:'' };
+  if(digits.length === 7) return { ok:true, barcode: toPrintableEan8(digits) };
+  if(digits.length === 8){
+    const expected = toPrintableEan8(digits.slice(0, 7));
+    if(digits !== expected){
+      return {
+        ok:false,
+        error:'إذا أدخلت 8 أرقام فيجب أن يكون الرقم الثامن صحيحًا لباركود EAN-8'
+      };
+    }
+    return { ok:true, barcode: digits };
+  }
+  return { ok:false, error:'باركود المنتج يجب أن يكون 7 أرقام أو 8 أرقام فقط' };
 }
 
 function toPrintableEan8(value){
@@ -200,6 +226,23 @@ function handleGlobalBarcodeScan(barcode){
 
 
 function gen13Barcode() { return genRandomEan8(); }
+
+function ensureStoredProductBarcode(product){
+  if(!product) return '';
+  if(product.barcode) return product.barcode;
+
+  const barcode = gen13Barcode();
+  product.barcode = barcode;
+
+  const prods = DB.get('products');
+  const idx = prods.findIndex(p => p.id === product.id);
+  if(idx >= 0){
+    prods[idx] = { ...prods[idx], barcode, updatedAt: nowISO() };
+    DB.set('products', prods);
+  }
+
+  return barcode;
+}
 function genBarcode()   { return genRandomEan8(); }
 
 // ====== UPDATED INVENTORY FUNCTIONS ======
@@ -276,14 +319,27 @@ function saveProduct(){
   const desc    = [ram, storage, battery, color].filter(Boolean).join(' | ');
   const note    = '';
   let barcode  = document.getElementById('inv-barcode').value.trim();
+  const prods = DB.get('products');
+  const currentProd = _invEditId ? prods.find(p => p.id === _invEditId) : null;
 
   if(!name) { toast('أدخل اسم المنتج','err'); document.getElementById('inv-name').focus(); return; }
   if(!price){ toast('أدخل سعر البيع','err');  document.getElementById('inv-price').focus(); return; }
 
-  if(!barcode) barcode = gen13Barcode();
-  barcode = normalizeProductBarcode(barcode);
-
-  const prods = DB.get('products');
+  if(_invEditId && currentProd){
+    if(!barcode) barcode = currentProd.barcode || gen13Barcode();
+    else if(barcode !== String(currentProd.barcode || '').trim()) {
+      const normalized = normalizeProductBarcode(barcode);
+      if(!normalized.ok){ toast(normalized.error, 'err'); return; }
+      barcode = normalized.barcode;
+    }
+  } else {
+    if(!barcode) barcode = gen13Barcode();
+    else {
+      const normalized = normalizeProductBarcode(barcode);
+      if(!normalized.ok){ toast(normalized.error, 'err'); return; }
+      barcode = normalized.barcode;
+    }
+  }
 
   if(_invEditId){
     const idx = prods.findIndex(p=>p.id===_invEditId);
@@ -597,7 +653,7 @@ function toggleSelectAll(checked){
 function buildProductLabelPages(products){
   const buildId = Date.now();
   return products.map((p, index) => {
-    const barcode = toPrintableEan8(p.barcode || genRandom13());
+    const barcode = ensureStoredProductBarcode(p);
     const priceFormatted = Number(p.price).toLocaleString('fr-DZ');
     const specs = [p.ram, p.storage, p.battery].filter(Boolean).join(' | ');
 
@@ -652,6 +708,23 @@ function getProductLabelNameMarkup(name){
   return `<div class="name" style="font-size:${fontSize}pt !important;transform:scaleX(${scale});transform-origin:center center;">${safeName}</div>`;
 }
 
+function getProductLabelFontUrl(fileName){
+  return new URL(`../fonts/${fileName}`, window.location.href).href;
+}
+
+function getProductLabelFontFaceCss(){
+  const agrandirUrl = getProductLabelFontUrl('Agrandir Wide Light 300.otf');
+
+  return `
+  @font-face {
+    font-family: 'SJ Agrandir Price';
+    src: url('${agrandirUrl}') format('opentype');
+    font-style: normal;
+    font-weight: 300;
+    font-display: swap;
+  }`;
+}
+
 function startBulkPrint(){
   const selected = [...document.querySelectorAll('.inv-select-cb:checked')].map(cb=>cb.dataset.id);
   if(!selected.length){ toast('⚠️ لم تحدد أي منتج','warn'); return; }
@@ -668,7 +741,7 @@ function startBulkPrint(){
     return;
 
     selectedProds.forEach((p, index) => {
-      const barcode = toPrintableEan8(p.barcode || genRandom13());
+      const barcode = ensureStoredProductBarcode(p);
       const priceFormatted = Number(p.price).toLocaleString('fr-DZ');
       const specs = [p.ram, p.storage, p.battery].filter(Boolean).join(' | ');
 
@@ -716,11 +789,13 @@ function _doBulkPrint(pages){
       <div class="price">${pg.priceFormatted} DA</div>
     </div>`).join('');
 
+  const labelFontCss = getProductLabelFontFaceCss();
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
   @page { size: 5cm 2.5cm; margin: 0; }
+  ${labelFontCss}
   * { margin:0; padding:0; box-sizing:border-box; }
-  html, body { background:#fff; font-family:'Open Sauce One', 'Open Sauce', Arial, sans-serif; direction:rtl; }
+  html, body { background:#fff; font-family:'SJ Agrandir Price', 'Agrandir Grand', sans-serif; direction:rtl; }
   .label-page {
     width: calc(5cm - 4mm);
     height: 2.5cm;
@@ -739,10 +814,10 @@ function _doBulkPrint(pages){
   .name  {
     font-size:12.2pt !important;
     font-size:12.7pt !important;
-    font-weight:600;
+    font-weight:500;
     text-align:center;
     line-height:1;
-    font-family:'Open Sauce One', 'Open Sauce', Arial, sans-serif;
+    font-family:'SJ Agrandir Price', 'Agrandir Grand', sans-serif;
     margin-top:0.2mm;
     max-height: 5.1mm;
     white-space: nowrap;
@@ -757,7 +832,7 @@ function _doBulkPrint(pages){
     text-align:center;
     color:#111;
     line-height:0.98;
-    font-family:'Open Sauce One', 'Open Sauce', Arial, sans-serif;
+    font-family:'SJ Agrandir Price', 'Agrandir Grand', sans-serif;
     max-height: 4.4mm;
     overflow: hidden;
     width: 100%;
@@ -778,7 +853,7 @@ function _doBulkPrint(pages){
     font-weight:500;
     text-align:center;
     letter-spacing:0;
-    font-family:'Agrandir Grand', sans-serif !important;
+    font-family:'SJ Agrandir Price', 'Agrandir Grand', sans-serif !important;
     line-height:1;
     max-height: 3.8mm;
     overflow: hidden;
@@ -896,7 +971,7 @@ function printProductLabel(){
     const p = _printProd;
     const priceFormatted = Number(p.price).toLocaleString('fr-DZ');
     const specs = [p.ram, p.storage, p.battery].filter(Boolean).join(' | ');
-    const barcode = toPrintableEan8(p.barcode || genRandom13());
+    const barcode = ensureStoredProductBarcode(p);
 
     const tempSvg = document.createElementNS('http://www.w3.org/2000/svg','svg');
     tempSvg.id = '_temp_label_bc';
@@ -919,14 +994,16 @@ function printProductLabel(){
       const svgHtml = tempSvg.outerHTML;
       tempSvg.remove();
 
+      const labelFontCss = getProductLabelFontFaceCss();
       const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
   @page { size: 5cm 2.5cm; margin: 0; }
+  ${labelFontCss}
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body {
     width: 5cm; height: 2.5cm;
     overflow: hidden;
-    font-family: 'Open Sauce One', 'Open Sauce', Arial, sans-serif;
+    font-family: 'SJ Agrandir Price', 'Agrandir Grand', sans-serif;
     background: #fff;
     direction: rtl;
   }
@@ -942,10 +1019,10 @@ function printProductLabel(){
   .name  {
     font-size: 12.2pt !important;
     font-size: 12.7pt !important;
-    font-weight: 600;
+    font-weight: 500;
     text-align: center;
     line-height: 1;
-    font-family: 'Open Sauce One', 'Open Sauce', Arial, sans-serif;
+    font-family: 'SJ Agrandir Price', 'Agrandir Grand', sans-serif;
     margin-top:0.2mm;
     max-height: 5.1mm;
     white-space: nowrap;
@@ -960,7 +1037,7 @@ function printProductLabel(){
     text-align: center;
     color: #222;
     line-height: 0.98;
-    font-family: 'Open Sauce One', 'Open Sauce', Arial, sans-serif;
+    font-family: 'SJ Agrandir Price', 'Agrandir Grand', sans-serif;
     max-height: 4.4mm;
     overflow: hidden;
     width: 100%;
@@ -987,7 +1064,7 @@ function printProductLabel(){
     font-weight: 500;
     text-align: center;
     letter-spacing: 0;
-    font-family: 'Agrandir Grand', sans-serif !important;
+    font-family: 'SJ Agrandir Price', 'Agrandir Grand', sans-serif !important;
     line-height: 1;
     max-height: 3.8mm;
     overflow: hidden;
