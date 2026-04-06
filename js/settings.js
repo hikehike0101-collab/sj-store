@@ -110,8 +110,7 @@ function deletePageData(page){
     async ()=>{
       const cfg = execMap[page];
       if(cfg){
-        localStorage.removeItem(cfg.key);
-        try{ DB.clear(cfg.col); }catch(e){}
+        try{ DB.set(cfg.col, []); }catch(e){}
         await clearFirestoreCollection(cfg.col);
         cfg.render();
         toast(`✅ تم حذف بيانات ${name} بنجاح`);
@@ -128,12 +127,9 @@ function clearAllData(){
     `هل أنت متأكد؟ سيتم حذف كل المنتجات والمبيعات والتقسيط والديون والتصليح والعمال. لا يمكن التراجع!`,
     async ()=>{
       const cols = window.APP_COLLECTIONS || ['products','sales','transactions','installments','debts','repairs','workers'];
-      // حذف من localStorage
       cols.forEach(k=>{
-        localStorage.removeItem('sj_'+k);
-        try{DB.clear(k);}catch(e){}
+        try{ DB.set(k, []); }catch(e){}
       });
-      localStorage.removeItem('sj_worker');
       try{DB.clearAll();}catch(e){}
 
       // حذف من Firestore نهائياً

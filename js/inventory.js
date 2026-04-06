@@ -786,7 +786,7 @@ function _doBulkPrint(pages){
       ${getProductLabelNameMarkup(pg.p.name)}
       ${pg.specs ? `<div class="specs">${pg.specs}</div>` : ''}
       <div class="bc">${pg.svgHtml}</div>
-      <div class="price">${pg.priceFormatted} DA</div>
+      <div class="price">${pg.priceFormatted}</div>
     </div>`).join('');
 
   const labelFontCss = getProductLabelFontFaceCss();
@@ -1074,7 +1074,7 @@ function printProductLabel(){
   ${getProductLabelNameMarkup(p.name)}
   ${specs ? `<div class="specs">${specs}</div>` : ''}
   <div class="bc">${svgHtml}</div>
-  <div class="price">${priceFormatted} DA</div>
+  <div class="price">${priceFormatted}</div>
 </div></body></html>`;
 
       let iframe = document.getElementById('print-label-iframe');
@@ -1124,7 +1124,7 @@ function printProductBarcode(){
   closeModal('print-choice-ov');
   const p = _printProd;
   const priceFormatted = Number(p.price).toLocaleString('fr-DZ');
-  const barcodeData = [p.name, p.desc||'', priceFormatted+' DA', p.note||'']
+  const barcodeData = [p.name, p.desc||'', priceFormatted, p.note||'']
     .filter(Boolean).join(' | ');
   const tempSvg = document.createElementNS('http://www.w3.org/2000/svg','svg');
   tempSvg.id = '_temp_bc';
@@ -1141,7 +1141,7 @@ function printProductBarcode(){
       <div style="font-size:10px;font-weight:700;margin-bottom:1px">${p.name}</div>
       ${p.note ? `<div style="font-size:9px;margin-bottom:1px">${p.note}</div>` : ''}
       ${svgHtml}
-      <div style="font-size:10px;font-weight:900;margin-top:1px">${priceFormatted} DA</div>
+      <div style="font-size:10px;font-weight:900;margin-top:1px">${priceFormatted}</div>
     </div>`;
     doPrint(html, '5.2cm', '2cm');
   }catch(e){
@@ -1259,20 +1259,38 @@ async function printWarranty(p) {
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
+  @font-face {
+    font-family: 'WarrantyCairo';
+    src: url('fonts/Cairo Regular 400.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'WarrantyCairo';
+    src: url('fonts/Cairo Bold 700.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'WarrantyMigra';
+    src: url('fonts/Migra Extrabold 800.otf') format('opentype');
+    font-weight: 800;
+    font-style: normal;
+  }
   :root { --blue:#2c4a73; --border:#5d7c90; --bg:#f0f2f5; }
   @page { size:A4 landscape; margin:0; }
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { width:29.7cm; height:21cm; font-family:'Cairo',sans-serif; background:#fff; overflow:hidden; display:flex; justify-content:flex-start; align-items:flex-start; }
-  .page { width:13.4cm; height:20.6cm; padding:0.35cm 0.3cm 0.7cm; box-sizing:border-box; margin-top:0.15cm; display:flex; flex-direction:column; }
+  body { width:29.7cm; height:21cm; font-family:'WarrantyCairo',sans-serif; background:#fff; overflow:hidden; display:flex; justify-content:center; align-items:flex-start; }
+  .pages { display:flex; gap:0.35cm; align-items:flex-start; justify-content:center; width:100%; margin-top:0.15cm; direction:ltr; }
+  .page { width:13.35cm; height:20.6cm; padding:0.35cm 0.3cm 0.7cm; box-sizing:border-box; display:flex; flex-direction:column; flex:none; direction:rtl; }
 
   /* رأس الصفحة */
   .hdr { display:flex; justify-content:center; align-items:center; margin-bottom:4px; }
   .logo { width:2.2cm; height:2.2cm; object-fit:contain; background:transparent; }
   .hdr-mid { text-align:center; flex:0 1 auto; margin:0 0.55cm; }
-  .hdr-mid h1 { font-size:28pt; margin:0; font-weight:900; color:var(--blue); font-style:italic; letter-spacing:-1px; }
-  .hdr-mid p { font-size:8pt; margin:1px 0; color:#333; font-weight:600; font-family:'Celandine','Cairo',sans-serif; }
+  .hdr-mid h1 { font-size:28pt; margin:0; font-family:'WarrantyMigra','WarrantyCairo',sans-serif; font-weight:800; color:var(--blue); font-style:italic; letter-spacing:-1px; }
+  .hdr-mid p { font-size:8pt; margin:1px 0; color:#333; font-weight:600; font-family:'WarrantyCairo',sans-serif; }
 
   /* شريط التواصل */
   .contact { display:flex; justify-content:space-between; border-top:1px solid var(--border); border-bottom:1px solid var(--border); padding:5px 0; margin:4px 0 7px; font-size:10.5pt; font-weight:700; flex-wrap:wrap; gap:4px; }
@@ -1396,6 +1414,16 @@ async function printWarranty(p) {
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument || iframe.contentWindow.document;
   doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    const page = doc.querySelector('.page');
+    if (!page || doc.querySelector('.pages')) return;
+    const wrap = doc.createElement('div');
+    wrap.className = 'pages';
+    const clone = page.cloneNode(true);
+    page.parentNode.insertBefore(wrap, page);
+    wrap.appendChild(clone);
+    wrap.appendChild(page);
+  }, 50);
   setTimeout(() => {
     try { iframe.contentWindow.focus(); iframe.contentWindow.print(); }
     catch (e) {

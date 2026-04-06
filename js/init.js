@@ -431,8 +431,7 @@ window.deletePageData = function deletePageData(page) {
     const cfg = execMap[page];
     if (!cfg) return;
 
-    localStorage.removeItem(cfg.key);
-    try { DB.clear(cfg.col); } catch (e) {}
+    try { DB.set(cfg.col, []); } catch (e) {}
     await clearFirestoreCollection(cfg.col);
     cfg.render();
     toast(`✅ تم حذف بيانات ${name} بنجاح`);

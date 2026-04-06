@@ -32,9 +32,18 @@ function compactPendingOps(ops) {
   const latest = new Map();
   for (const op of ops) {
     if (!op || !op.col || !op.id || !op.type) continue;
-    latest.set(`${op.col}:${op.id}`, op);
+    latest.set(`${op.uid || 'legacy'}:${op.col}:${op.id}`, op);
   }
   return Array.from(latest.values());
+}
+
+function currentPendingOps() {
+  const uid = window._fsUid || localStorage.getItem('sj_uid') || null;
+  return readPendingOps().filter(op => {
+    if (!op) return false;
+    if (!uid) return true;
+    return !op.uid || op.uid === uid;
+  });
 }
 
 function appCollections() {
@@ -80,7 +89,7 @@ function stampRecordForWrite(col, next, previous = null) {
 
 function pendingOpsByCollection(col) {
   const map = new Map();
-  readPendingOps()
+  currentPendingOps()
     .filter(op => op && op.col === col && op.id)
     .forEach(op => map.set(String(op.id), op));
   return map;
@@ -132,16 +141,16 @@ window.clearUserDataCache = function() {
     localStorage.removeItem('sj_' + key);
     delete _cache['_obj_' + key];
   });
-  writePendingOps([]);
 };
 
 function queuePendingOp(op) {
-  const ops = compactPendingOps([...readPendingOps(), { ...op, queuedAt: new Date().toISOString() }]);
+  const uid = op.uid || window._fsUid || localStorage.getItem('sj_uid') || null;
+  const ops = compactPendingOps([...readPendingOps(), { ...op, uid, queuedAt: new Date().toISOString() }]);
   writePendingOps(ops);
 }
 
 window.getPendingFirestoreOpsCount = function() {
-  return readPendingOps().length;
+  return currentPendingOps().length;
 };
 
 window.clearPendingFirestoreOps = function() {
@@ -154,12 +163,15 @@ async function importFirestoreSdk() {
 
 async function flushPendingFirestoreOps() {
   if (!window._fs || !window._fsUid || !navigator.onLine) return false;
-  let ops = readPendingOps();
+  const ops = readPendingOps();
   if (!ops.length) return true;
+  const currentOps = ops.filter(op => !op?.uid || op.uid === window._fsUid);
+  const otherOps = ops.filter(op => op?.uid && op.uid !== window._fsUid);
+  if (!currentOps.length) return true;
   try {
     const { doc, setDoc, deleteDoc } = await importFirestoreSdk();
     const remaining = [];
-    for (const op of ops) {
+    for (const op of currentOps) {
       try {
         if (op.type === 'delete') {
           await deleteDoc(doc(window._fs, fsPath(op.col), String(op.id)));
@@ -172,7 +184,7 @@ async function flushPendingFirestoreOps() {
         console.warn(`pending op failed [${op.type}:${op.col}/${op.id}]`, e.message);
       }
     }
-    writePendingOps(compactPendingOps(remaining));
+    writePendingOps(compactPendingOps([...otherOps, ...remaining]));
     return remaining.length === 0;
   } catch (e) {
     console.warn('flushPendingFirestoreOps:', e.message);
@@ -238,31 +250,23 @@ async function syncFromFirestore() {
 async function fsSaveDoc(col, id, data) {
   if (!id) return;
   const clean = JSON.parse(JSON.stringify(data));
-  if (!window._fs || !window._fsUid || !navigator.onLine) {
-    queuePendingOp({ type: 'set', col, id: String(id), data: clean });
-    return;
-  }
+  queuePendingOp({ type: 'set', col, id: String(id), data: clean });
+  if (!window._fs || !window._fsUid || !navigator.onLine) return;
   try {
-    const { doc, setDoc } = await importFirestoreSdk();
-    await setDoc(doc(window._fs, fsPath(col), String(id)), clean);
+    await flushPendingFirestoreOps();
   } catch (e) {
-    queuePendingOp({ type: 'set', col, id: String(id), data: clean });
     console.warn(`fsSaveDoc [${col}/${id}]:`, e.message);
   }
 }
 
 async function fsDeleteDoc(col, id) {
   if (!id) return;
-  if (!window._fs || !window._fsUid || !navigator.onLine) {
-    queuePendingOp({ type: 'delete', col, id: String(id) });
-    return;
-  }
+  queuePendingOp({ type: 'delete', col, id: String(id) });
+  if (!window._fs || !window._fsUid || !navigator.onLine) return;
   try {
-    const { doc, deleteDoc } = await importFirestoreSdk();
-    await deleteDoc(doc(window._fs, fsPath(col), String(id)));
+    await flushPendingFirestoreOps();
     console.log(`🗑️ حُذف: ${col}/${id}`);
   } catch (e) {
-    queuePendingOp({ type: 'delete', col, id: String(id) });
     console.warn(`fsDeleteDoc [${col}/${id}]:`, e.message);
   }
 }
