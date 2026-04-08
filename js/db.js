@@ -4,6 +4,10 @@
 const _cache = {};
 const FS_PENDING_OPS_KEY = 'sj_pending_fs_ops';
 const USER_LOCAL_OBJECT_KEYS = ['worker'];
+let _sqliteReady = false;
+let _sqliteLastImportedUid = null;
+let _sqliteStatusCache = new Map();
+let _sqlitePendingOpsMigratedUid = new Set();
 
 // ---- Firestore helpers ----
 window._fs = null;
@@ -12,20 +16,6 @@ window._fsReady = false;
 
 function fsPath(col) {
   return `users/${window._fsUid}/${col}`;
-}
-
-function readPendingOps() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(FS_PENDING_OPS_KEY) || '[]');
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
-  }
-}
-
-function writePendingOps(ops) {
-  localStorage.setItem(FS_PENDING_OPS_KEY, JSON.stringify(ops));
-  window.dispatchEvent(new CustomEvent('sj:pending-sync-changed', { detail: { count: ops.length } }));
 }
 
 function compactPendingOps(ops) {
@@ -38,7 +28,7 @@ function compactPendingOps(ops) {
 }
 
 function currentPendingOps() {
-  const uid = window._fsUid || localStorage.getItem('sj_uid') || null;
+  const uid = (typeof currentUserUid === 'function' ? currentUserUid() : '') || window._fsUid || localStorage.getItem('sj_uid') || null;
   return readPendingOps().filter(op => {
     if (!op) return false;
     if (!uid) return true;
@@ -47,7 +37,217 @@ function currentPendingOps() {
 }
 
 function appCollections() {
-  return window.APP_COLLECTIONS || ['products', 'sales', 'transactions', 'installments', 'debts', 'repairs', 'workers'];
+  return window.APP_COLLECTIONS || ['products', 'sales', 'transactions', 'installments', 'debts', 'repairs', 'warranties', 'workers'];
+}
+
+function sqliteApi() {
+  return window.nativeSqlite || null;
+}
+
+function canReadSqliteSync() {
+  const api = sqliteApi();
+  return !!api?.getCollectionSync;
+}
+
+function canReadSqliteQueueSync() {
+  const api = sqliteApi();
+  return !!api?.getSyncQueueSync;
+}
+
+function canWriteSqliteQueueSync() {
+  const api = sqliteApi();
+  return !!api?.replaceSyncQueueSync && !!api?.clearSyncQueueSync;
+}
+
+async function ensureSqliteReady() {
+  const api = sqliteApi();
+  if (!api?.init) return false;
+  if (_sqliteReady) return true;
+  try {
+    await api.init();
+    _sqliteReady = true;
+    return true;
+  } catch (e) {
+    console.warn('ensureSqliteReady:', e.message);
+    return false;
+  }
+}
+
+function currentDbUserUid() {
+  return (typeof currentUserUid === 'function' ? currentUserUid() : '') || window._fsUid || localStorage.getItem('sj_uid') || '';
+}
+
+function legacyPendingOpsRaw() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FS_PENDING_OPS_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function migrateLegacyPendingOpsToSqliteSync(uid = currentDbUserUid()) {
+  if (!uid || !canWriteSqliteQueueSync() || _sqlitePendingOpsMigratedUid.has(uid)) return;
+  const legacyOps = legacyPendingOpsRaw().filter(op => !op?.uid || op.uid === uid);
+  if (!legacyOps.length) {
+    _sqlitePendingOpsMigratedUid.add(uid);
+    return;
+  }
+  try {
+    const result = sqliteApi().replaceSyncQueueSync(uid, compactPendingOps(legacyOps));
+    if (result?.ok) _sqlitePendingOpsMigratedUid.add(uid);
+  } catch (e) {
+    console.warn('migrateLegacyPendingOpsToSqliteSync:', e.message);
+  }
+}
+
+function readPendingOpsFromSqliteSync(uid = currentDbUserUid()) {
+  if (!uid || !canReadSqliteQueueSync()) return null;
+  migrateLegacyPendingOpsToSqliteSync(uid);
+  try {
+    const response = sqliteApi().getSyncQueueSync(uid);
+    if (!response?.ok || !Array.isArray(response.ops)) return null;
+    return response.ops;
+  } catch (e) {
+    console.warn('readPendingOpsFromSqliteSync:', e.message);
+    return null;
+  }
+}
+
+function readPendingOps() {
+  const uid = currentDbUserUid();
+  const sqliteOps = readPendingOpsFromSqliteSync(uid);
+  if (Array.isArray(sqliteOps)) {
+    if (!canReadSqliteQueueSync()) {
+      localStorage.setItem(FS_PENDING_OPS_KEY, JSON.stringify(sqliteOps));
+    } else {
+      localStorage.removeItem(FS_PENDING_OPS_KEY);
+    }
+    return sqliteOps;
+  }
+  return legacyPendingOpsRaw();
+}
+
+function writePendingOps(ops) {
+  const normalizedOps = Array.isArray(ops) ? ops : [];
+  const uid = currentDbUserUid();
+  if (uid && canWriteSqliteQueueSync()) {
+    try {
+      sqliteApi().replaceSyncQueueSync(uid, normalizedOps);
+      _sqlitePendingOpsMigratedUid.add(uid);
+    } catch (e) {
+      console.warn('writePendingOps sqlite:', e.message);
+    }
+  }
+  if (!canWriteSqliteQueueSync()) {
+    localStorage.setItem(FS_PENDING_OPS_KEY, JSON.stringify(normalizedOps));
+  } else {
+    localStorage.removeItem(FS_PENDING_OPS_KEY);
+  }
+  window.dispatchEvent(new CustomEvent('sj:pending-sync-changed', { detail: { count: normalizedOps.length } }));
+}
+
+function readSqliteStatusSync(uid = currentDbUserUid()) {
+  if (!uid) return null;
+  if (_sqliteStatusCache.has(uid)) return _sqliteStatusCache.get(uid);
+  const api = sqliteApi();
+  if (!api?.statusSync) return null;
+  try {
+    const status = api.statusSync(uid);
+    if (status?.ok) _sqliteStatusCache.set(uid, status);
+    return status;
+  } catch (e) {
+    console.warn('readSqliteStatusSync:', e.message);
+    return null;
+  }
+}
+
+function readSqliteCollectionSync(col, uid = currentDbUserUid()) {
+  if (!uid || !canReadSqliteSync()) return null;
+  try {
+    const response = sqliteApi().getCollectionSync(uid, col);
+    if (!response?.ok || !Array.isArray(response.records)) return null;
+    return response.records;
+  } catch (e) {
+    console.warn(`readSqliteCollectionSync [${col}]:`, e.message);
+    return null;
+  }
+}
+
+function shouldMirrorCollectionsToLocalStorage(uid = currentDbUserUid()) {
+  if (!uid) return true;
+  if (!canReadSqliteSync()) return true;
+  return false;
+}
+
+function persistCollectionLocalMirror(col, records) {
+  if (shouldMirrorCollectionsToLocalStorage()) {
+    localStorage.setItem('sj_' + col, JSON.stringify(records));
+    return;
+  }
+  localStorage.removeItem('sj_' + col);
+}
+
+function cleanupLegacyCollectionMirrors(uid = currentDbUserUid()) {
+  if (!uid) return;
+  const status = readSqliteStatusSync(uid);
+  if (!status?.ok) return;
+  appCollections().forEach((col) => {
+    localStorage.removeItem('sj_' + col);
+  });
+}
+
+window.importCurrentLocalStateToSqlite = async function importCurrentLocalStateToSqlite(uid = currentDbUserUid()) {
+  if (!uid) return false;
+  if (!(await ensureSqliteReady())) return false;
+  const api = sqliteApi();
+  if (!api?.importLocalSnapshot) return false;
+  const snapshot = {};
+  appCollections().forEach((col) => {
+    snapshot[col] = normalizeCollectionList(col, readLocalCollectionSource(col));
+  });
+  try {
+    await api.importLocalSnapshot(uid, snapshot);
+    _sqliteLastImportedUid = uid;
+    _sqliteStatusCache.delete(uid);
+    cleanupLegacyCollectionMirrors(uid);
+    return true;
+  } catch (e) {
+    console.warn('importCurrentLocalStateToSqlite:', e.message);
+    return false;
+  }
+};
+
+window.getSqliteMigrationStatus = async function getSqliteMigrationStatus(uid = currentDbUserUid()) {
+  if (!(await ensureSqliteReady())) return { ok: false, reason: 'sqlite_unavailable' };
+  const api = sqliteApi();
+  if (!api?.status) return { ok: false, reason: 'status_unavailable' };
+  try {
+    return await api.status(uid);
+  } catch (e) {
+    return { ok: false, reason: e.message || 'status_failed' };
+  }
+};
+
+async function mirrorCollectionToSqlite(col, records) {
+  const uid = currentDbUserUid();
+  if (!uid || !Array.isArray(records)) return;
+  if (!(await ensureSqliteReady())) return;
+  const api = sqliteApi();
+  if (!api?.putCollection) return;
+  try {
+    await api.putCollection(uid, col, records);
+    _sqliteStatusCache.delete(uid);
+    cleanupLegacyCollectionMirrors(uid);
+  } catch (e) {
+    console.warn(`mirrorCollectionToSqlite [${col}]:`, e.message);
+  }
+}
+
+function readLocalCollectionSource(col) {
+  const sqliteRecords = readSqliteCollectionSync(col);
+  if (Array.isArray(sqliteRecords)) return sqliteRecords;
+  return readStoredCollection(col);
 }
 
 function normalizeCollectionList(col, items) {
@@ -85,6 +285,26 @@ function stampRecordForWrite(col, next, previous = null) {
     updatedAt: now,
     version: Math.max(recordVersion(previous), recordVersion(base), 0) + 1
   };
+}
+
+function comparableRecordShape(col, record, previous = null) {
+  const normalized = window.normalizeRecord ? normalizeRecord(col, record) : { ...record };
+  const comparable = {
+    ...normalized,
+    createdAt: previous?.createdAt || normalized.createdAt || null
+  };
+  delete comparable.updatedAt;
+  delete comparable.version;
+  return comparable;
+}
+
+function recordsHaveMeaningfulChanges(col, previous, next) {
+  if (!previous) return true;
+  try {
+    return JSON.stringify(comparableRecordShape(col, previous, previous)) !== JSON.stringify(comparableRecordShape(col, next, previous));
+  } catch {
+    return true;
+  }
 }
 
 function pendingOpsByCollection(col) {
@@ -133,6 +353,7 @@ function mergeCollectionRecords(col, localItems, cloudItems) {
 }
 
 window.clearUserDataCache = function() {
+  const uid = currentDbUserUid();
   appCollections().forEach(col => {
     localStorage.removeItem('sj_' + col);
     delete _cache[col];
@@ -141,10 +362,12 @@ window.clearUserDataCache = function() {
     localStorage.removeItem('sj_' + key);
     delete _cache['_obj_' + key];
   });
+  _sqliteStatusCache.clear();
+  if (uid) _sqlitePendingOpsMigratedUid.delete(uid);
 };
 
 function queuePendingOp(op) {
-  const uid = op.uid || window._fsUid || localStorage.getItem('sj_uid') || null;
+  const uid = op.uid || currentDbUserUid() || null;
   const ops = compactPendingOps([...readPendingOps(), { ...op, uid, queuedAt: new Date().toISOString() }]);
   writePendingOps(ops);
 }
@@ -154,6 +377,15 @@ window.getPendingFirestoreOpsCount = function() {
 };
 
 window.clearPendingFirestoreOps = function() {
+  const uid = currentDbUserUid();
+  if (uid && canWriteSqliteQueueSync()) {
+    try {
+      sqliteApi().clearSyncQueueSync(uid);
+      _sqlitePendingOpsMigratedUid.add(uid);
+    } catch (e) {
+      console.warn('clearPendingFirestoreOps sqlite:', e.message);
+    }
+  }
   writePendingOps([]);
 };
 
@@ -223,6 +455,7 @@ async function syncFromFirestore() {
   try {
     const { collection, getDocs } = await importFirestoreSdk();
     const cols = appCollections();
+    const sqliteSnapshot = {};
     let totalDocs = 0;
     for (const col of cols) {
       try {
@@ -232,15 +465,26 @@ async function syncFromFirestore() {
           if (!d2.id) d2.id = d.id;
           return window.normalizeRecord ? normalizeRecord(col, d2) : d2;
         });
-        const localData = readStoredCollection(col);
+        const localData = readLocalCollectionSource(col);
         const merged = mergeCollectionRecords(col, localData, cloudData);
         _cache[col] = merged;
-        localStorage.setItem('sj_' + col, JSON.stringify(merged));
+        sqliteSnapshot[col] = merged;
+        persistCollectionLocalMirror(col, merged);
         totalDocs += merged.length;
       } catch (e) {
         console.warn('sync error col:', col, e);
       }
     }
+    if (Object.keys(sqliteSnapshot).length && (await ensureSqliteReady())) {
+      try {
+        await sqliteApi()?.importLocalSnapshot?.(window._fsUid, sqliteSnapshot);
+        _sqliteLastImportedUid = window._fsUid;
+        _sqliteStatusCache.delete(window._fsUid);
+      } catch (e) {
+        console.warn('syncFromFirestore sqlite import:', e.message);
+      }
+    }
+    cleanupLegacyCollectionMirrors(window._fsUid);
     console.log(`✅ تمت المزامنة — ${totalDocs} سجل`);
   } catch (e) {
     console.error('syncFromFirestore خطأ:', e);
@@ -288,9 +532,28 @@ const DB = {
   get(k) {
     k = window.normalizeCollectionName ? normalizeCollectionName(k) : k;
     if (_cache[k] !== undefined) return _cache[k];
+
+    const uid = currentDbUserUid();
+    const sqliteRecords = readSqliteCollectionSync(k);
+    const sqliteStatus = readSqliteStatusSync(uid);
+    const sqliteImportedForUser = _sqliteLastImportedUid === uid;
+    const sqliteHasKnownState =
+      !!uid &&
+      (
+        sqliteImportedForUser ||
+        (sqliteStatus?.ok && Object.keys(sqliteStatus.collections || {}).length > 0)
+      );
+
+    if (Array.isArray(sqliteRecords) && (sqliteRecords.length || sqliteHasKnownState)) {
+      _cache[k] = normalizeCollectionList(k, sqliteRecords);
+      persistCollectionLocalMirror(k, _cache[k]);
+      return _cache[k];
+    }
+
     try {
-      _cache[k] = JSON.parse(localStorage.getItem('sj_' + k)) || [];
-      if (Array.isArray(_cache[k]) && window.normalizeRecord) {
+      const parsed = JSON.parse(localStorage.getItem('sj_' + k)) || [];
+      _cache[k] = Array.isArray(parsed) ? parsed : [];
+      if (window.normalizeRecord) {
         _cache[k] = _cache[k].map(item => normalizeRecord(k, item));
       }
     } catch {
@@ -301,28 +564,37 @@ const DB = {
 
   set(k, v) {
     k = window.normalizeCollectionName ? normalizeCollectionName(k) : k;
-    const prev = normalizeCollectionList(k, readStoredCollection(k));
+    const prev = normalizeCollectionList(k, readLocalCollectionSource(k));
     if (Array.isArray(v)) {
       const prevMap = new Map(prev.filter(item => item && item.id).map(item => [String(item.id), item]));
+      const changedItems = [];
       v = v.map(item => {
         if (!item) return item;
-        const prevItem = item.id ? prevMap.get(String(item.id)) : null;
-        return stampRecordForWrite(k, item, prevItem);
+        const normalized = window.normalizeRecord ? normalizeRecord(k, item) : { ...item };
+        const prevItem = normalized.id ? prevMap.get(String(normalized.id)) : null;
+        if (recordsHaveMeaningfulChanges(k, prevItem, normalized)) {
+          const stamped = stampRecordForWrite(k, normalized, prevItem);
+          changedItems.push(stamped);
+          return stamped;
+        }
+        return prevItem || normalized;
       });
-    }
-    _cache[k] = v;
-    localStorage.setItem('sj_' + k, JSON.stringify(v));
-    if (Array.isArray(v)) {
+      _cache[k] = v;
+      persistCollectionLocalMirror(k, v);
+      mirrorCollectionToSqlite(k, v);
       const nextIds = new Set(v.filter(item => item && item.id).map(item => String(item.id)));
       prev.forEach(item => {
         if (item && item.id && !nextIds.has(String(item.id))) {
           fsDeleteDoc(k, item.id);
         }
       });
-      v.forEach(item => {
+      changedItems.forEach(item => {
         if (item && item.id) fsSaveDoc(k, item.id, item);
       });
+      return;
     }
+    _cache[k] = v;
+    persistCollectionLocalMirror(k, v);
   },
 
   saveOne(col, item) {
@@ -334,7 +606,8 @@ const DB = {
     item = stampRecordForWrite(col, item, prevItem);
     if (idx >= 0) arr[idx] = item; else arr.push(item);
     _cache[col] = arr;
-    localStorage.setItem('sj_' + col, JSON.stringify(arr));
+    persistCollectionLocalMirror(col, arr);
+    mirrorCollectionToSqlite(col, arr);
     fsSaveDoc(col, item.id, item);
     return item;
   },
@@ -343,7 +616,8 @@ const DB = {
     col = window.normalizeCollectionName ? normalizeCollectionName(col) : col;
     const arr = DB.get(col).filter(x => x.id !== id);
     _cache[col] = arr;
-    localStorage.setItem('sj_' + col, JSON.stringify(arr));
+    persistCollectionLocalMirror(col, arr);
+    mirrorCollectionToSqlite(col, arr);
     fsDeleteDoc(col, id);
   },
 
@@ -356,7 +630,8 @@ const DB = {
     const arr = DB.get('transactions');
     arr.push(tx);
     _cache.transactions = arr;
-    localStorage.setItem('sj_transactions', JSON.stringify(arr));
+    persistCollectionLocalMirror('transactions', arr);
+    mirrorCollectionToSqlite('transactions', arr);
     fsSaveDoc('transactions', tx.id, tx);
     return tx;
   },

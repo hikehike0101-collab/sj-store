@@ -13,22 +13,48 @@
   let authApi = null;
 
   function authCollections() {
-    return window.APP_COLLECTIONS || ['products', 'sales', 'transactions', 'installments', 'debts', 'repairs', 'workers'];
+    return window.APP_COLLECTIONS || ['products', 'sales', 'transactions', 'installments', 'debts', 'repairs', 'warranties', 'workers'];
+  }
+
+  function hasSqliteUserSnapshot(uid) {
+    if (!uid) return false;
+    try {
+      const status = window.nativeSqlite?.statusSync?.(uid);
+      return !!(status?.ok && Object.values(status.collections || {}).some(count => Number(count) > 0));
+    } catch {
+      return false;
+    }
   }
 
   function hasLocalUserSnapshot(uid) {
     if (!uid) return false;
-    if (localStorage.getItem('sj_uid') !== uid) return false;
+    if (currentUserUid() !== uid) return false;
+    if (hasSqliteUserSnapshot(uid)) return true;
     return authCollections().some(col => localStorage.getItem('sj_' + col) !== null);
   }
 
   function hasOfflineSession() {
-    const uid = localStorage.getItem('sj_uid');
+    const uid = currentUserUid();
     return localStorage.getItem(AUTH_OFFLINE_ALLOWED_KEY) === '1' && hasLocalUserSnapshot(uid);
   }
 
   function pendingOpsCount() {
     return Number(window.getPendingFirestoreOpsCount?.() || 0);
+  }
+
+  function offlineSyncMessage() {
+    const count = pendingOpsCount();
+    return count
+      ? `⚠️ يعمل بدون إنترنت — ${count} تغييرات بانتظار المزامنة`
+      : '⚠️ يعمل بدون إنترنت';
+  }
+
+  function applySyncResult(synced) {
+    if (synced) {
+      setSyncIndicator('online');
+      return;
+    }
+    setSyncIndicator('offline', offlineSyncMessage());
   }
 
   function setSyncIndicator(state, msg) {
@@ -87,11 +113,12 @@
 
   function setCachedEmailDisplay() {
     const emailEl = document.getElementById('settings-email-display');
-    if (emailEl) emailEl.textContent = localStorage.getItem('sj_email') || '—';
+    if (emailEl) emailEl.textContent = currentUserEmail() || '—';
   }
 
   function bootOfflineSession(reason) {
     if (!hasOfflineSession()) return false;
+    window.importCurrentLocalStateToSqlite?.(currentUserUid());
     setCachedEmailDisplay();
     hideAuthOverlay();
     bootAppFromCache();
@@ -169,15 +196,16 @@
     if (authBootingUid === user.uid) return;
     authBootingUid = user.uid;
 
-    const previousUid = localStorage.getItem('sj_uid');
+    const previousUid = currentUserUid();
     const switchedUser = !!previousUid && previousUid !== user.uid;
     if (switchedUser) {
       window.clearUserDataCache?.();
     }
 
-    localStorage.setItem('sj_uid', user.uid);
-    localStorage.setItem('sj_email', user.email);
+    setCurrentSessionUser(user.uid, user.email);
     localStorage.setItem(AUTH_OFFLINE_ALLOWED_KEY, '1');
+    await window.importCurrentLocalStateToSqlite?.(user.uid);
+    await window.syncUserScopedSecurityState?.();
     setCachedEmailDisplay();
 
     const needsSync =
@@ -196,7 +224,7 @@
       const msg = count
         ? `⚠️ يعمل بدون إنترنت — ${count} تغييرات بانتظار المزامنة`
         : '⚠️ يعمل بدون إنترنت';
-      setSyncIndicator('offline', msg);
+      setSyncIndicator('offline', offlineSyncMessage());
       authBootingUid = null;
       return;
     }
@@ -207,8 +235,28 @@
     if (!needsSync) {
       hideAuthOverlay();
       bootAppFromCache();
-      setSyncIndicator('hidden');
+      setSyncIndicator('syncing');
       authBootingUid = null;
+
+      authApi.dbMod.get(authApi.dbMod.ref(authApi.db, `users/${user.uid}/profile`))
+        .then(snap => {
+          if (snap.exists()) setCurrentStoreName(snap.val().storeName || 'SJ STORE');
+        })
+        .catch(() => {});
+
+      initFirestore(user.uid)
+        .then((synced) => {
+          applySyncResult(synced);
+        })
+        .catch((e) => {
+          console.error('❌ Background Firestore sync:', e.message);
+          const count = pendingOpsCount();
+          const msg = count
+            ? `⚠️ يعمل بدون إنترنت — ${count} تغييرات بانتظار المزامنة`
+            : '⚠️ يعمل بدون إنترنت';
+          setSyncIndicator('offline', offlineSyncMessage());
+        });
+
       console.log('✅ Fast local login on same device');
       return;
     }
@@ -218,7 +266,7 @@
 
     authApi.dbMod.get(authApi.dbMod.ref(authApi.db, `users/${user.uid}/profile`))
       .then(snap => {
-        if (snap.exists()) localStorage.setItem('sj_store_name', snap.val().storeName || 'SJ STORE');
+        if (snap.exists()) setCurrentStoreName(snap.val().storeName || 'SJ STORE');
       })
       .catch(() => {});
 
@@ -228,12 +276,14 @@
         email: user.email
       }).catch(() => {});
 
-      await initFirestore(user.uid);
-      localStorage.setItem(AUTH_LAST_SYNC_UID_KEY, user.uid);
-      localStorage.removeItem(AUTH_SYNC_FLAG_KEY);
+      const synced = await initFirestore(user.uid);
+      if (synced) {
+        localStorage.setItem(AUTH_LAST_SYNC_UID_KEY, user.uid);
+        localStorage.removeItem(AUTH_SYNC_FLAG_KEY);
+      }
 
       bootAppFromCache();
-      setSyncIndicator('online');
+      applySyncResult(synced);
       console.log('✅ Firestore synced');
     } catch (e) {
       console.error('❌ Firestore:', e.message);
@@ -371,18 +421,20 @@
 
   window.authDoLogout = async function() {
     window.clearUserDataCache?.();
-    localStorage.removeItem('sj_uid');
-    localStorage.removeItem('sj_email');
-    localStorage.removeItem('sj_store_name');
+    clearCurrentSessionState();
     localStorage.removeItem(AUTH_SYNC_FLAG_KEY);
     localStorage.removeItem(AUTH_LAST_SYNC_UID_KEY);
     localStorage.removeItem(AUTH_OFFLINE_ALLOWED_KEY);
     authBootingUid = null;
+    window._fsUid = null;
+    window._fsReady = false;
+    window._fs = null;
     if (authRuntimeReady) {
       await authApi.authMod.signOut(authApi.auth);
     }
     authSwitchTab('login');
     setSyncIndicator('hidden');
+    await window.syncUserScopedSecurityState?.();
     showAuthOverlay();
   };
 
@@ -442,7 +494,7 @@
       await authApi.authMod.reauthenticateWithCredential(user, credential);
       await authApi.authMod.updateEmail(user, newEmail);
       await authApi.authMod.sendEmailVerification(user);
-      localStorage.setItem('sj_email', newEmail);
+      setCurrentSessionUser(currentUserUid(), newEmail);
       setCachedEmailDisplay();
       showMsg('✅ تم تغيير البريد — تحقق من بريدك الجديد', true);
       ['fb-pwd-for-email', 'fb-new-email'].forEach(id => { document.getElementById(id).value = ''; });

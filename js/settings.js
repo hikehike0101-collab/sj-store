@@ -1,391 +1,318 @@
-// ====== settings.js — الإعدادات ======
-
-// ====== SETTINGS ======
-// ====== نظام حذف البيانات بكلمة السر ======
-// المنطق: كلمة السر ← نافذة تأكيد ← الحذف الفعلي
-let _deletePendingAction = null;
-let _deleteConfirmTitle  = '';
-let _deleteConfirmMsg    = '';
+// ====== settings.js - unified settings logic ======
 
 async function clearFirestoreCollection(col){
   if(!(window._fsReady && window._fs && window._fsUid)) return;
   try {
     const { collection, getDocs, deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
     const snap = await getDocs(collection(window._fs, fsPath(col)));
-    for(const d of snap.docs){
-      await deleteDoc(doc(window._fs, fsPath(col), d.id));
+    for (const item of snap.docs) {
+      await deleteDoc(doc(window._fs, fsPath(col), item.id));
     }
-  } catch(e) {
+  } catch (e) {
     console.warn(`clearFirestoreCollection [${col}]:`, e);
   }
 }
 
-function openDeletePwd(pwdTitle, pwdMsg, confirmTitle, confirmMsg, action){
-  _deletePendingAction = action;
-  _deleteConfirmTitle  = confirmTitle;
-  _deleteConfirmMsg    = confirmMsg;
-  document.getElementById('del-pwd-title').textContent = pwdTitle;
-  document.getElementById('del-pwd-msg').textContent   = pwdMsg;
-  document.getElementById('del-pwd-input').value = '';
-  document.getElementById('del-pwd-error').style.display = 'none';
-  const ov  = document.getElementById('del-pwd-ov');
-  const box = document.getElementById('del-pwd-box');
-  ov.style.opacity='1'; ov.style.pointerEvents='all';
-  box.style.transform='translateY(0) scale(1)';
-  setTimeout(()=>document.getElementById('del-pwd-input').focus(), 200);
-}
+window.clearFirestoreCollection = clearFirestoreCollection;
 
-function closeDeletePwd(){
-  const ov  = document.getElementById('del-pwd-ov');
+window.closeDeletePwd = function closeDeletePwd(){
+  const ov = document.getElementById('del-pwd-ov');
   const box = document.getElementById('del-pwd-box');
-  ov.style.opacity='0'; ov.style.pointerEvents='none';
-  box.style.transform='translateY(20px) scale(.97)';
-}
-
-function confirmDeletePwd(){
-  const val = document.getElementById('del-pwd-input').value;
-  if(val === getPWD()){
-    // كلمة السر صحيحة → أغلق نافذة السر وافتح نافذة التأكيد
-    closeDeletePwd();
-    setTimeout(()=>{
-      showConfirm(
-        _deleteConfirmTitle,
-        _deleteConfirmMsg,
-        ()=>{ if(_deletePendingAction){ _deletePendingAction(); _deletePendingAction=null; } },
-        '🗑️'
-      );
-    }, 300);
-  } else {
-    const err = document.getElementById('del-pwd-error');
-    err.style.display='block';
-    document.getElementById('del-pwd-input').value='';
-    document.getElementById('del-pwd-input').focus();
-    setTimeout(()=>err.style.display='none', 2500);
+  if (ov) {
+    ov.style.opacity = '0';
+    ov.style.pointerEvents = 'none';
   }
-}
+  if (box) {
+    box.style.transform = 'translateY(20px) scale(.97)';
+  }
+};
 
-document.addEventListener('DOMContentLoaded',()=>{
-  const di = document.getElementById('del-pwd-input');
-  if(di) di.addEventListener('keypress',e=>{ if(e.key==='Enter') confirmDeletePwd(); });
-});
-
-// حذف بيانات صفحة محددة
-function deletePageData(page){
-  const pageNames = {
-    inventory:    'إدارة المخزون',
-    installments: 'بيانات التقسيط',
-    debts:        'سجل الديون',
-    repairs:      'تصليح الأعطال'
+function currentTelegramSettings(){
+  window.migrateUserScopedSettings?.();
+  return {
+    token: getUserSetting('tg_token'),
+    chatId: getUserSetting('tg_chatid'),
+    disabled: getUserSetting('tg_disabled') === '1'
   };
-  const name = pageNames[page] || page;
-
-  const execMap = {
-    inventory: {
-      col: 'products',
-      key: 'sj_products',
-      render: ()=>renderInventory()
-    },
-    installments: {
-      col: 'installments',
-      key: 'sj_installments',
-      render: ()=>renderInstallments()
-    },
-    debts: {
-      col: 'debts',
-      key: 'sj_debts',
-      render: ()=>renderDebts()
-    },
-    repairs: {
-      col: 'repairs',
-      key: 'sj_repairs',
-      render: ()=>renderRepairs()
-    }
-  };
-
-  openDeletePwd(
-    `🔒 تأكيد الهوية`,
-    `أدخل كلمة السر لحذف بيانات "${name}"`,
-    `🗑️ تأكيد حذف بيانات ${name}`,
-    `هل أنت متأكد من حذف جميع بيانات "${name}" نهائياً؟ لا يمكن التراجع عن هذا الإجراء.`,
-    async ()=>{
-      const cfg = execMap[page];
-      if(cfg){
-        try{ DB.set(cfg.col, []); }catch(e){}
-        await clearFirestoreCollection(cfg.col);
-        cfg.render();
-        toast(`✅ تم حذف بيانات ${name} بنجاح`);
-      }
-    }
-  );
 }
 
-function clearAllData(){
-  openDeletePwd(
-    `🔒 تأكيد الهوية`,
-    `أدخل كلمة السر لمسح كل البيانات`,
-    `⚠️ مسح كل البيانات نهائياً`,
-    `هل أنت متأكد؟ سيتم حذف كل المنتجات والمبيعات والتقسيط والديون والتصليح والعمال. لا يمكن التراجع!`,
-    async ()=>{
-      const cols = window.APP_COLLECTIONS || ['products','sales','transactions','installments','debts','repairs','workers'];
-      cols.forEach(k=>{
-        try{ DB.set(k, []); }catch(e){}
-      });
-      try{DB.clearAll();}catch(e){}
+window.migrateUserScopedSettings = function migrateUserScopedSettings(){
+  const uid = currentUserUid();
+  if (!uid) return;
 
-      // حذف من Firestore نهائياً
-      if(window._fsReady && window._fs && window._fsUid){
-        try {
-          for(const col of cols){
-            await clearFirestoreCollection(col);
-          }
-          console.log('✅ تم مسح كل بيانات Firestore');
-        } catch(e){ console.warn('clearAllData Firestore:', e); }
-      }
+  const legacyToken = localStorage.getItem('sj_tg_token');
+  const legacyChatId = localStorage.getItem('sj_tg_chatid');
+  const legacyDisabled = localStorage.getItem('sj_tg_disabled');
 
-      toast('✅ تم مسح كل البيانات بنجاح');
-      renderSettings();
-    }
-  );
-}
+  if (legacyToken !== null && !hasUserSetting('tg_token', uid)) {
+    setUserSetting('tg_token', legacyToken, uid);
+  }
+  if (legacyChatId !== null && !hasUserSetting('tg_chatid', uid)) {
+    setUserSetting('tg_chatid', legacyChatId, uid);
+  }
+  if (legacyDisabled !== null && !hasUserSetting('tg_disabled', uid)) {
+    setUserSetting('tg_disabled', legacyDisabled, uid);
+  }
 
-// ====== تبديل تبويبات الحساب ======
-function switchAccTab(tab){
-  document.getElementById('acc-tab-pwd').classList.toggle('active', tab==='pwd');
-  document.getElementById('acc-tab-email').classList.toggle('active', tab==='email');
-  document.getElementById('acc-sec-pwd').style.display   = tab==='pwd'   ? 'block' : 'none';
-  document.getElementById('acc-sec-email').style.display = tab==='email' ? 'block' : 'none';
-  // مسح الرسائل
-  ['fb-pwd-msg','fb-email-msg'].forEach(id=>{
+  localStorage.removeItem('sj_tg_token');
+  localStorage.removeItem('sj_tg_chatid');
+  localStorage.removeItem('sj_tg_disabled');
+};
+
+window.switchAccTab = function switchAccTab(tab){
+  document.getElementById('acc-tab-pwd')?.classList.toggle('active', tab === 'pwd');
+  document.getElementById('acc-tab-email')?.classList.toggle('active', tab === 'email');
+  const pwdSection = document.getElementById('acc-sec-pwd');
+  const emailSection = document.getElementById('acc-sec-email');
+  if (pwdSection) pwdSection.style.display = tab === 'pwd' ? 'block' : 'none';
+  if (emailSection) emailSection.style.display = tab === 'email' ? 'block' : 'none';
+  ['fb-pwd-msg', 'fb-email-msg'].forEach(id => {
     const el = document.getElementById(id);
-    if(el){ el.style.display='none'; el.textContent=''; }
+    if (el) {
+      el.style.display = 'none';
+      el.textContent = '';
+    }
   });
-}
+};
 
-// ====== تغيير كلمة مرور Firebase ======
-async function changeFirebasePwd(){
-  const oldPwd  = document.getElementById('fb-old-pwd').value;
-  const newPwd  = document.getElementById('fb-new-pwd').value;
-  const confirm = document.getElementById('fb-confirm-pwd').value;
-  const msgEl   = document.getElementById('fb-pwd-msg');
+window.refreshStorageEngineStatus = async function refreshStorageEngineStatus(){
+  const badge = document.getElementById('storage-engine-badge');
+  const uidEl = document.getElementById('storage-engine-uid');
+  const pendingEl = document.getElementById('storage-engine-pending');
+  const colsEl = document.getElementById('storage-engine-cols');
+  const noteEl = document.getElementById('storage-engine-note');
+  const modeEl = document.getElementById('storage-engine-mode');
+  const uid = currentUserUid();
 
-  const showMsg = (txt, ok) => {
-    msgEl.textContent = txt;
-    msgEl.style.display = 'block';
-    msgEl.style.background = ok ? 'rgba(56,161,105,.12)' : 'rgba(229,62,62,.12)';
-    msgEl.style.color = ok ? '#276749' : 'var(--red)';
-    msgEl.style.border = ok ? '1px solid #9AE6B4' : '1px solid #FED7D7';
+  if (uidEl) uidEl.textContent = uid || '—';
+  if (pendingEl) pendingEl.textContent = String(window.getPendingFirestoreOpsCount?.() || 0);
+  if (modeEl) modeEl.textContent = 'SQLite + Firebase';
+  if (!badge || !colsEl || !noteEl) return;
+
+  badge.style.background = '#FFFAF0';
+  badge.style.color = 'var(--orange)';
+  badge.textContent = 'جارٍ الفحص...';
+  colsEl.innerHTML = '';
+  noteEl.textContent = 'جارٍ قراءة حالة SQLite...';
+
+  const status = await window.getSqliteMigrationStatus?.(uid);
+  if (!status?.ok) {
+    badge.style.background = '#FFF5F5';
+    badge.style.color = 'var(--red)';
+    badge.textContent = 'SQLite غير جاهزة';
+    noteEl.textContent = 'تعذر قراءة حالة SQLite حالياً. اضغط "استيراد إلى SQLite" ثم أعد التحديث إذا كنت في بداية الترحيل.';
+    return;
+  }
+
+  const cols = status.collections || {};
+  const totalRecords = Object.values(cols).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  badge.style.background = '#F0FFF4';
+  badge.style.color = '#276749';
+  badge.textContent = totalRecords > 0 ? 'SQLite جاهزة' : 'SQLite فارغة';
+
+  const labels = {
+    warranties: 'الضمان',
+    products: 'المنتجات',
+    sales: 'المبيعات',
+    transactions: 'المعاملات',
+    installments: 'التقسيط',
+    debts: 'الديون',
+    repairs: 'التصليح',
+    workers: 'العمال'
   };
 
-  if(!oldPwd)       { showMsg('❌ أدخل كلمة المرور الحالية', false); return; }
-  if(!newPwd)       { showMsg('❌ أدخل كلمة المرور الجديدة', false); return; }
-  if(newPwd.length < 6) { showMsg('❌ كلمة المرور يجب أن تكون 6 أحرف على الأقل', false); return; }
-  if(newPwd !== confirm){ showMsg('❌ كلمتا المرور غير متطابقتان', false); return; }
+  colsEl.innerHTML = (window.APP_COLLECTIONS || Object.keys(labels)).map((col) => {
+    const count = Number(cols[col] || 0);
+    return `
+      <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--text-gray);margin-bottom:4px">${labels[col] || col}</div>
+        <div style="font-size:18px;font-weight:900;color:var(--text-dark)">${count}</div>
+      </div>
+    `;
+  }).join('');
 
-  try {
-    // نحتاج Firebase Auth — نستخدمه عبر FDB إذا كان متاحاً
-    if(typeof firebase !== 'undefined' || window._fbAuth) {
-      const auth = window._fbAuth;
-      const user = auth.currentUser;
-      if(!user) { showMsg('❌ غير مسجل الدخول', false); return; }
+  noteEl.textContent = totalRecords > 0
+    ? `قاعدة SQLite تحتوي حالياً على ${totalRecords} سجل محلي، والعمليات المعلقة الحالية هي ${window.getPendingFirestoreOpsCount?.() || 0}.`
+    : 'SQLite موجودة لكنها لا تحتوي سجلات للمستخدم الحالي بعد. إذا كانت لديك بيانات حالية فاضغط "استيراد إلى SQLite".';
+};
 
-      // إعادة المصادقة أولاً
-      const { EmailAuthProvider, reauthenticateWithCredential, updatePassword } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
-      const credential = EmailAuthProvider.credential(user.email, oldPwd);
-      await reauthenticateWithCredential(user, credential);
-      await updatePassword(user, newPwd);
-
-      showMsg('✅ تم تغيير كلمة المرور بنجاح', true);
-      document.getElementById('fb-old-pwd').value = '';
-      document.getElementById('fb-new-pwd').value = '';
-      document.getElementById('fb-confirm-pwd').value = '';
-    } else {
-      showMsg('❌ Firebase غير متصل — تأكد من تشغيل firebase-db.js', false);
-    }
-  } catch(e) {
-    const map = {
-      'auth/wrong-password': '❌ كلمة المرور الحالية غير صحيحة',
-      'auth/invalid-credential': '❌ كلمة المرور الحالية غير صحيحة',
-      'auth/too-many-requests': '⚠️ محاولات كثيرة — انتظر قليلاً',
-      'auth/network-request-failed': '❌ تحقق من اتصالك بالإنترنت',
-    };
-    showMsg(map[e.code] || '❌ حدث خطأ — حاول مرة أخرى', false);
+window.forceImportCurrentStateToSqlite = async function forceImportCurrentStateToSqlite(){
+  const uid = currentUserUid();
+  if (!uid) {
+    toast('سجل الدخول أولاً', 'err');
+    return;
   }
-}
-
-// ====== تغيير البريد الإلكتروني Firebase ======
-async function changeFirebaseEmail(){
-  const pwd      = document.getElementById('fb-pwd-for-email').value;
-  const newEmail = document.getElementById('fb-new-email').value.trim();
-  const msgEl    = document.getElementById('fb-email-msg');
-
-  const showMsg = (txt, ok) => {
-    msgEl.textContent = txt;
-    msgEl.style.display = 'block';
-    msgEl.style.background = ok ? 'rgba(56,161,105,.12)' : 'rgba(229,62,62,.12)';
-    msgEl.style.color = ok ? '#276749' : 'var(--red)';
-    msgEl.style.border = ok ? '1px solid #9AE6B4' : '1px solid #FED7D7';
-  };
-
-  if(!pwd)      { showMsg('❌ أدخل كلمة المرور للتأكيد', false); return; }
-  if(!newEmail) { showMsg('❌ أدخل البريد الإلكتروني الجديد', false); return; }
-
-  try {
-    if(typeof firebase !== 'undefined' || window._fbAuth) {
-      const auth = window._fbAuth;
-      const user = auth.currentUser;
-      if(!user) { showMsg('❌ غير مسجل الدخول', false); return; }
-
-      const { EmailAuthProvider, reauthenticateWithCredential, updateEmail, sendEmailVerification } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
-      const credential = EmailAuthProvider.credential(user.email, pwd);
-      await reauthenticateWithCredential(user, credential);
-      await updateEmail(user, newEmail);
-      await sendEmailVerification(user);
-
-      localStorage.setItem('sj_email', newEmail);
-      document.getElementById('settings-email-display').textContent = newEmail;
-
-      showMsg('✅ تم تغيير البريد الإلكتروني — تحقق من بريدك الجديد للتأكيد', true);
-      document.getElementById('fb-pwd-for-email').value = '';
-      document.getElementById('fb-new-email').value = '';
-    } else {
-      showMsg('❌ Firebase غير متصل', false);
-    }
-  } catch(e) {
-    const map = {
-      'auth/wrong-password': '❌ كلمة المرور غير صحيحة',
-      'auth/invalid-credential': '❌ كلمة المرور غير صحيحة',
-      'auth/email-already-in-use': '❌ هذا البريد مستخدم بالفعل',
-      'auth/invalid-email': '❌ البريد الإلكتروني غير صالح',
-      'auth/too-many-requests': '⚠️ محاولات كثيرة — انتظر قليلاً',
-      'auth/network-request-failed': '❌ تحقق من اتصالك بالإنترنت',
-    };
-    showMsg(map[e.code] || '❌ حدث خطأ — حاول مرة أخرى', false);
+  const ok = await window.importCurrentLocalStateToSqlite?.(uid);
+  if (ok) {
+    toast('✅ تم استيراد البيانات الحالية إلى SQLite');
+    await window.refreshStorageEngineStatus?.();
+    return;
   }
-}
+  toast('❌ تعذر استيراد البيانات إلى SQLite', 'err');
+};
 
-function renderSettings(){
-  // عرض البريد الإلكتروني الحالي
+window.renderSettings = function renderSettings(){
+  window.migrateUserScopedSettings?.();
+  window.refreshStorageEngineStatus?.();
+
   const emailEl = document.getElementById('settings-email-display');
-  if(emailEl) emailEl.textContent = localStorage.getItem('sj_email') || '—';
+  if (emailEl) emailEl.textContent = currentUserEmail() || '—';
 
-  const token    = localStorage.getItem('sj_tg_token')||'';
-  const chatId   = localStorage.getItem('sj_tg_chatid')||'';
-  const disabled = localStorage.getItem('sj_tg_disabled')==='1';
-
-  // لا نعرض التوكن المحفوظ — فقط placeholder يشير لوجوده
-  document.getElementById('tg-token').value  = '';
-  document.getElementById('tg-chatid').value = '';
-  document.getElementById('tg-token').placeholder  = token  ? '●●●●●●●●●●●●●●●● (محفوظ)' : '123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-  document.getElementById('tg-chatid').placeholder = chatId ? '●●●●●●●● (محفوظ)' : 'مثال: 123456789';
-
-  const badge    = document.getElementById('tg-status-badge');
+  const { token, chatId, disabled } = currentTelegramSettings();
+  const tokenInput = document.getElementById('tg-token');
+  const chatInput = document.getElementById('tg-chatid');
+  const badge = document.getElementById('tg-status-badge');
   const toggleBtn = document.getElementById('tg-toggle-btn');
 
-  if(token && chatId && !disabled){
-    badge.style.background='#F0FFF4'; badge.style.color='#276749';
-    badge.textContent='✅ مفعّل';
-    if(toggleBtn){ toggleBtn.textContent='⏸ تعطيل'; }
-  } else if(token && chatId && disabled){
-    badge.style.background='#FFFAF0'; badge.style.color='var(--orange)';
-    badge.textContent='⏸ معطّل';
-    if(toggleBtn){ toggleBtn.textContent='▶ تفعيل'; }
-  } else {
-    badge.style.background='#FFF5F5'; badge.style.color='var(--red)';
-    badge.textContent='⭕ غير مفعّل';
-    if(toggleBtn){ toggleBtn.textContent='⏸ تعطيل'; }
+  if (tokenInput) {
+    tokenInput.value = '';
+    tokenInput.placeholder = token ? '•••••••••••••••• (محفوظ)' : '123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
   }
-}
+  if (chatInput) {
+    chatInput.value = '';
+    chatInput.placeholder = chatId ? '•••••••• (محفوظ)' : 'مثال: 123456789';
+  }
 
-function saveTgSettings(){
-  const tokenInput  = document.getElementById('tg-token').value.trim();
-  const chatIdInput = document.getElementById('tg-chatid').value.trim();
+  if (!badge) return;
 
-  // نبقي القيمة القديمة إذا الحقل فارغ
-  const oldToken  = localStorage.getItem('sj_tg_token')||'';
-  const oldChatId = localStorage.getItem('sj_tg_chatid')||'';
+  if (token && chatId && !disabled) {
+    badge.style.background = '#F0FFF4';
+    badge.style.color = '#276749';
+    badge.textContent = '✅ مفعّل';
+    if (toggleBtn) toggleBtn.textContent = '⏸ تعطيل';
+    return;
+  }
 
-  const token  = tokenInput  || oldToken;
-  const chatId = chatIdInput || oldChatId;
+  if (token && chatId && disabled) {
+    badge.style.background = '#FFFAF0';
+    badge.style.color = 'var(--orange)';
+    badge.textContent = '⏸ معطّل';
+    if (toggleBtn) toggleBtn.textContent = '▶ تفعيل';
+    return;
+  }
 
-  if(!token)  { toast('أدخل توكن البوت','err'); return; }
-  if(!chatId) { toast('أدخل Chat ID','err'); return; }
+  badge.style.background = '#FFF5F5';
+  badge.style.color = 'var(--red)';
+  badge.textContent = '⭘ غير مفعّل';
+  if (toggleBtn) toggleBtn.textContent = '⏸ تعطيل';
+};
 
-  localStorage.setItem('sj_tg_token',  token);
-  localStorage.setItem('sj_tg_chatid', chatId);
-  localStorage.removeItem('sj_tg_disabled');
+window.saveTgSettings = function saveTgSettings(){
+  const uid = currentUserUid();
+  if (!uid) {
+    toast('سجل الدخول أولاً لحفظ الإعدادات', 'err');
+    return;
+  }
+
+  const tokenInput = document.getElementById('tg-token')?.value.trim() || '';
+  const chatIdInput = document.getElementById('tg-chatid')?.value.trim() || '';
+  const current = currentTelegramSettings();
+  const token = tokenInput || current.token;
+  const chatId = chatIdInput || current.chatId;
+
+  if (!token) { toast('أدخل توكن البوت', 'err'); return; }
+  if (!chatId) { toast('أدخل Chat ID', 'err'); return; }
+
+  setUserSetting('tg_token', token, uid);
+  setUserSetting('tg_chatid', chatId, uid);
+  removeUserSetting('tg_disabled', uid);
   renderSettings();
   toast('✅ تم حفظ إعدادات التيليجرام');
-}
+};
 
-function clearTgSettings(){
-  showConfirm('إزالة إعدادات التيليجرام','هل تريد حذف التوكن والـ Chat ID؟',()=>{
-    localStorage.removeItem('sj_tg_token');
-    localStorage.removeItem('sj_tg_chatid');
-    localStorage.removeItem('sj_tg_disabled');
+window.clearTgSettings = function clearTgSettings(){
+  showConfirm('إزالة إعدادات التيليجرام', 'هل تريد حذف التوكن والـ Chat ID؟', () => {
+    const uid = currentUserUid();
+    removeUserSetting('tg_token', uid);
+    removeUserSetting('tg_chatid', uid);
+    removeUserSetting('tg_disabled', uid);
     renderSettings();
     toast('✅ تم حذف إعدادات التيليجرام');
-  },'🗑️');
-}
+  }, '🗑️');
+};
 
-function toggleTg(){
-  const wasDisabled = localStorage.getItem('sj_tg_disabled')==='1';
-  const token  = localStorage.getItem('sj_tg_token')||'';
-  const chatId = localStorage.getItem('sj_tg_chatid')||'';
+window.toggleTg = function toggleTg(){
+  const uid = currentUserUid();
+  if (!uid) {
+    toast('سجل الدخول أولاً', 'err');
+    return;
+  }
 
-  if(wasDisabled){
-    localStorage.removeItem('sj_tg_disabled');
+  const { token, chatId, disabled } = currentTelegramSettings();
+  if (!token || !chatId) {
+    toast('احفظ التوكن والـ Chat ID أولاً', 'err');
+    return;
+  }
+
+  if (disabled) {
+    removeUserSetting('tg_disabled', uid);
     toast('✅ تم تفعيل التيليجرام');
   } else {
-    localStorage.setItem('sj_tg_disabled','1');
+    setUserSetting('tg_disabled', '1', uid);
     toast('⏸ تم تعطيل التيليجرام');
   }
 
-  const nowDisabled = !wasDisabled;
-  const badge  = document.getElementById('tg-status-badge');
-  const btn    = document.getElementById('tg-toggle-btn');
+  renderSettings();
+};
 
-  if(token && chatId && !nowDisabled){
-    badge.style.background='#F0FFF4'; badge.style.color='#276749';
-    badge.textContent='✅ مفعّل';
-    if(btn) btn.textContent='⏸ تعطيل';
-  } else if(token && chatId && nowDisabled){
-    badge.style.background='#FFFAF0'; badge.style.color='var(--orange)';
-    badge.textContent='⏸ معطّل';
-    if(btn) btn.textContent='▶ تفعيل';
-  } else {
-    badge.style.background='#FFF5F5'; badge.style.color='var(--red)';
-    badge.textContent='⭕ غير مفعّل';
-    if(btn) btn.textContent='⏸ تعطيل';
-  }
-}
+window.testTgBot = async function testTgBot(){
+  const tokenInput = document.getElementById('tg-token')?.value.trim() || '';
+  const chatIdInput = document.getElementById('tg-chatid')?.value.trim() || '';
+  const current = currentTelegramSettings();
+  const token = tokenInput || current.token;
+  const chatId = chatIdInput || current.chatId;
 
-async function testTgBot(){
-  // يقرأ من localStorage مباشرة وليس من الحقل الفارغ
-  const token  = localStorage.getItem('sj_tg_token')||document.getElementById('tg-token').value.trim();
-  const chatId = localStorage.getItem('sj_tg_chatid')||document.getElementById('tg-chatid').value.trim();
-
-  if(!token)  { toast('أدخل توكن البوت أولاً','err'); return; }
-  if(!chatId) { toast('أدخل Chat ID أولاً','err'); return; }
+  if (!token)  { toast('أدخل توكن البوت أولاً', 'err'); return; }
+  if (!chatId) { toast('أدخل Chat ID أولاً', 'err'); return; }
 
   toast('⏳ جاري إرسال رسالة اختبار...');
 
-  try{
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: chatId,
-        parse_mode:'HTML',
-        text: normalizeTelegramMessage(`✅ <b>SJ STORE Pro</b>\n\nتم ربط البرنامج بنجاح! 🎉\nستصلك الإشعارات التلقائية من الآن.\n\nالتاريخ: ${todayStr()}`)
+        chat_id: String(chatId).trim(),
+        parse_mode: 'HTML',
+        text: normalizeTelegramMessage(`✅ <b>SJ STORE Pro</b>\n\nتم ربط البرنامج بنجاح!\nستصلك الإشعارات التلقائية من الآن.\n\nالتاريخ: ${todayStr()}`)
       })
     });
     const data = await res.json();
-    if(data.ok){
+    if (data.ok) {
       toast('✅ تم الإرسال بنجاح! تحقق من تيليجرام');
     } else {
-      toast('❌ خطأ: '+( data.description||'تحقق من التوكن والـ Chat ID'),'err');
+      toast('❌ خطأ: ' + (data.description || 'تحقق من التوكن والـ Chat ID'), 'err');
     }
-  } catch(e){
-    toast('❌ تعذر الاتصال بالإنترنت','err');
+  } catch (e) {
+    toast('❌ تعذر الاتصال بالإنترنت', 'err');
   }
-}
+};
+
+window.clearAllData = function clearAllData(){
+  window.openDeletePwd(
+    '🔒 تأكيد الهوية',
+    'أدخل كلمة السر لمسح كل البيانات',
+    '⚠️ مسح كل البيانات نهائياً',
+    'هل أنت متأكد؟ سيتم حذف كل المنتجات والمبيعات والتقسيط والديون والتصليح والعمال. لا يمكن التراجع!',
+    async () => {
+      const cols = window.APP_COLLECTIONS || ['products', 'sales', 'transactions', 'installments', 'debts', 'repairs', 'warranties', 'workers'];
+      cols.forEach(col => {
+        try { DB.set(col, []); } catch {}
+      });
+      try { DB.clearAll(); } catch {}
+
+      if (window._fsReady && window._fs && window._fsUid) {
+        try {
+          for (const col of cols) {
+            await clearFirestoreCollection(col);
+          }
+        } catch (e) {
+          console.warn('clearAllData Firestore:', e);
+        }
+      }
+
+      renderSettings();
+      toast('✅ تم مسح كل البيانات بنجاح');
+    }
+  );
+};

@@ -393,21 +393,18 @@ function calcDebtRemain(){
 }
 
 function calcDebtProfit(){
-  // عند إدخال التكلفة: نحسب الربح = سعر البيع - التكلفة
   const cost     = parseFloat(document.getElementById('dm-cost').value)||0;
-  const salePrice = parseFloat(document.getElementById('dm-profit').value)||0; // سعر البيع
+  const salePrice = parseFloat(document.getElementById('dm-profit').value)||0;
   const netProfit = Math.max(0, salePrice - cost);
   const profitEl  = document.getElementById('dm-profit-display');
   if(profitEl) profitEl.textContent = fmt(netProfit);
-  // الإجمالي = سعر البيع (هو نفسه مبلغ الدين)
-  if(salePrice > 0){
-    document.getElementById('dm-total').value = salePrice;
-    calcDebtRemain();
-  }
+  document.getElementById('dm-total').value = salePrice > 0 ? String(salePrice) : '';
+  calcDebtRemain();
 }
 
 function calcDebtTotal(){
-  // عند إدخال سعر البيع: نحدث الإجمالي والربح
+  const total = parseFloat(document.getElementById('dm-total').value)||0;
+  document.getElementById('dm-profit').value = total > 0 ? String(total) : '';
   calcDebtProfit();
 }
 
@@ -589,6 +586,14 @@ function upsertDebtCreditSale(debtRec) {
   return creditSale.id;
 }
 
+function normalizeDebtPayments(payments = [], initialPaid = 0, recordDate = nowISO()) {
+  const laterPayments = (payments || []).filter(payment => payment?.saleId);
+  if (initialPaid > 0) {
+    return [{ amount: initialPaid, date: recordDate, kind: 'initial' }, ...laterPayments];
+  }
+  return laterPayments;
+}
+
 function openDebtModal(editId=null){
   _debtEditId = editId;
   _debtSelectedProducts = [];
@@ -644,7 +649,9 @@ function saveDebt(){
     if (idx >= 0) {
       const currentDebt = data[idx];
       const previousProducts = currentDebt.selectedProducts || [];
-      const laterPaid = (currentDebt.payments || []).reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
+      const laterPaid = (currentDebt.payments || [])
+        .filter(payment => payment?.saleId)
+        .reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
       if (total < laterPaid) { toast('⚠️ الإجمالي الجديد أقل من المبالغ المسددة سابقاً', 'err'); return; }
       const initialPaid = Math.max(0, paid - laterPaid);
       if (!syncDebtProductStock(previousProducts, selectedProducts)) return;
@@ -661,6 +668,7 @@ function saveDebt(){
         totalDebt: total,
         paid: Math.max(0, initialPaid + laterPaid),
         remaining: Math.max(0, total - (initialPaid + laterPaid)),
+        payments: normalizeDebtPayments(currentDebt.payments, initialPaid, currentDebt.date || nowISO()),
         lastUpdate: nowISO(),
         archived: false,
         archivedAt: ''
@@ -689,7 +697,7 @@ function saveDebt(){
       lastUpdate: nowISO(),
       archived: false,
       archivedAt: '',
-      payments: []
+      payments: normalizeDebtPayments([], paid, nowISO())
     };
     rec.saleId = upsertDebtCreditSale(rec);
     data.push(rec);

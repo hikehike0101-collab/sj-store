@@ -37,6 +37,7 @@ function openKapaProductModal(editId = null) {
     document.getElementById('kapa-battery').value = p.battery || '';
     document.getElementById('kapa-barcode').value = p.barcode || '';
     document.getElementById('kapa-color').value   = p.color || '';
+    document.getElementById('kapa-profit').value = Math.max(0, (parseFloat(p.price) || 0) - (parseFloat(p.cost) || 0));
     calcKapaProfit();
   } else {
     document.getElementById('kapa-modal-title').textContent = '📱 إضافة منتج كابا (هاتف)';
@@ -72,6 +73,7 @@ function saveKapaProduct() {
   const note    = '';
   const prods = DB.get('products');
   const currentProd = _kapaEditId ? prods.find(p => p.id === _kapaEditId) : null;
+  let savedProd = null;
 
     if (!name)  { toast('أدخل اسم الهاتف', 'err'); return; }
     if (!price) { toast('أدخل سعر البيع', 'err'); return; }
@@ -102,6 +104,7 @@ function saveKapaProduct() {
         barcode, desc: specs, note, ram, storage, battery, color,
         productType: 'kapa',
         updatedAt: nowISO() };
+      savedProd = prods[idx];
     }
       toast('✅ تم تحديث بيانات الهاتف');
   } else {
@@ -111,12 +114,12 @@ function saveKapaProduct() {
       productType: 'kapa',
       date: nowISO(), createdAt: nowISO()
     });
+      savedProd = prods[prods.length - 1];
       toast('✅ تم إضافة الهاتف للمخزون');
   }
 
   DB.set('products', prods);
-  const lastKapa = prods[prods.length - 1];
-  if (lastKapa) fsSaveDoc('products', lastKapa.id, lastKapa);
+  if (savedProd) fsSaveDoc('products', savedProd.id, savedProd);
   closeModal('kapa-modal-ov');
   renderInventory();
 }
@@ -288,8 +291,8 @@ function openInvModal(editId=null){
     document.getElementById('inv-qty').value     = p.qty||0;
     document.getElementById('inv-price').value   = p.price||0;
     if(costInput) costInput.value = p.cost||0;
-    if(profitInput) profitInput.value = p.profit||0;
-    document.getElementById('inv-cost-display').textContent = num(p.profit||0)+' DA';
+    if(profitInput) profitInput.value = Math.max(0, (parseFloat(p.price)||0) - (parseFloat(p.cost)||0));
+    document.getElementById('inv-cost-display').textContent = num(Math.max(0, (parseFloat(p.price)||0) - (parseFloat(p.cost)||0)))+' DA';
     document.getElementById('inv-barcode').value = p.barcode||'';
     document.getElementById('inv-desc').value    = p.color||p.desc||'';
     const ramEl = document.getElementById('inv-ram');
@@ -298,6 +301,7 @@ function openInvModal(editId=null){
     if(ramEl)     ramEl.value     = p.ram||'';
     if(storageEl) storageEl.value = p.storage||'';
     if(batteryEl) batteryEl.value = p.battery||'';
+    calcProfitFromCost();
   } else {
     document.getElementById('inv-modal-title').textContent = 'إضافة منتج عادي';
     document.getElementById('inv-barcode').placeholder = gen13Barcode() + ' (أوتو 8 رقم)';
@@ -321,6 +325,7 @@ function saveProduct(){
   let barcode  = document.getElementById('inv-barcode').value.trim();
   const prods = DB.get('products');
   const currentProd = _invEditId ? prods.find(p => p.id === _invEditId) : null;
+  let savedProd = null;
 
   if(!name) { toast('أدخل اسم المنتج','err'); document.getElementById('inv-name').focus(); return; }
   if(!price){ toast('أدخل سعر البيع','err');  document.getElementById('inv-price').focus(); return; }
@@ -347,6 +352,7 @@ function saveProduct(){
       prods[idx] = {...prods[idx], name, qty, price, profit, cost,
         barcode, desc, note, color, ram, storage, battery,
         updatedAt:nowISO()};
+      savedProd = prods[idx];
     }
     toast('✅ تم تحديث المنتج بنجاح');
   } else {
@@ -355,12 +361,12 @@ function saveProduct(){
       barcode, desc, note, color, ram, storage, battery,
       date:nowISO(), createdAt:nowISO()
     });
+    savedProd = prods[prods.length - 1];
     toast('✅ تم إضافة المنتج للمخزون');
   }
 
   DB.set('products', prods);
-  const lastProd = prods[prods.length - 1];
-  if (lastProd) fsSaveDoc('products', lastProd.id, lastProd);
+  if (savedProd) fsSaveDoc('products', savedProd.id, savedProd);
   closeModal('inv-modal-ov');
   renderInventory();
 }
@@ -450,13 +456,21 @@ function doPrint(htmlContent, pageW='6cm', pageH='4cm'){
 
 const WARRANTY_FORM_IMAGE_URL = 'assets/warranty-form.png';
 
-async function printWarranty(){
+async function printWarrantyLegacy(){
   if(!_posProd) return;
-  const name     = document.getElementById('warr-name').value.trim();
-  const phone    = document.getElementById('warr-phone').value.trim();
-  const color    = document.getElementById('warr-color').value.trim();
-  const imei     = document.getElementById('warr-imei').value.trim();
-  const duration = document.getElementById('warr-duration').value.trim();
+  const source = overrideData || {
+    name: document.getElementById('warr-name').value.trim(),
+    phone: document.getElementById('warr-phone').value.trim(),
+    color: document.getElementById('warr-color').value.trim(),
+    imei: document.getElementById('warr-imei').value.trim(),
+    duration: document.getElementById('warr-duration').value.trim()
+  };
+
+  const name     = String(source.name || '').trim();
+  const phone    = String(source.phone || '').trim();
+  const color    = String(source.color || '').trim();
+  const imei     = String(source.imei || '').trim();
+  const duration = String(source.duration || '').trim();
   if(!name)    { toast('أدخل اسم الزبون','err'); return; }
   if(!duration){ toast('أدخل مدة الضمان','err'); return; }
 
@@ -1220,7 +1234,7 @@ function renderInventory(){
 const WARRANTY_LOGO_LEFT = 'assets/warranty-logo-left.png';
 const WARRANTY_LOGO_RIGHT = 'assets/warranty-logo-right.png';
 
-async function printWarranty(p) {
+async function printWarranty(p, overrideData = null) {
   const product = p || (typeof _posProd !== 'undefined' ? _posProd : null);
   if (!product) {
     toast('اختر منتج الضمان أولاً', 'err');

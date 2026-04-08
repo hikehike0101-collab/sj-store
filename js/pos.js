@@ -5,6 +5,38 @@ let _posProd = null;
 let _saleQty = 1;
 let _saleType = 'cash';
 
+function currentSaleUnitPrice(){
+  const input = document.getElementById('sale-price-input');
+  const value = parseFloat(input?.value);
+  return Number.isFinite(value) ? Math.max(0, value) : parseFloat(_posProd?.price) || 0;
+}
+
+function currentSaleUnitCost(){
+  const input = document.getElementById('sale-cost-input');
+  const value = parseFloat(input?.value);
+  return Number.isFinite(value) ? Math.max(0, value) : parseFloat(_posProd?.cost) || 0;
+}
+
+function currentSaleBaseTotal(){
+  return currentSaleUnitPrice() * _saleQty;
+}
+
+function currentSaleBaseProfit(){
+  return Math.max(0, (currentSaleUnitPrice() - currentSaleUnitCost()) * _saleQty);
+}
+
+function updateSaleProfitPreview(){
+  const profitEl = document.getElementById('sale-profit-preview');
+  if(!profitEl) return;
+  const baseProfit = currentSaleBaseProfit();
+  if(_saleType === 'installment'){
+    const extra = parseFloat(document.getElementById('inst-extra')?.value)||0;
+    profitEl.textContent = fmt(baseProfit + extra);
+    return;
+  }
+  profitEl.textContent = fmt(baseProfit);
+}
+
 function renderPOS(){
   const q = (document.getElementById('pos-search').value||'').trim().toLowerCase();
   let prods = DB.get('products');
@@ -50,6 +82,8 @@ function openSale(prodId){
   document.getElementById('pos-prod-name').textContent = _posProd.name;
   document.getElementById('pos-prod-price').textContent = fmt(_posProd.price);
   document.getElementById('sale-qty').textContent = 1;
+  document.getElementById('sale-cost-input').value = String(parseFloat(_posProd.cost)||0);
+  document.getElementById('sale-price-input').value = String(parseFloat(_posProd.price)||0);
 
   // إظهار/إخفاء زر الضمان حسب نوع المنتج
   const warrantyTab = document.getElementById('tab-warranty');
@@ -106,16 +140,18 @@ function changeSaleQty(d){
 
 function updateSaleTotals(){
   if(!_posProd) return;
-  const total = (_posProd.price||0) * _saleQty;
+  const total = currentSaleBaseTotal();
+  document.getElementById('pos-prod-price').textContent = fmt(currentSaleUnitPrice());
   document.getElementById('cash-total').textContent = fmt(total);
   document.getElementById('cred-total-lbl').textContent = fmt(total);
   calcInstallment();
   calcCredit();
+  updateSaleProfitPreview();
 }
 
 function calcInstallment(){
   if(!_posProd) return;
-  const base = (_posProd.price||0) * _saleQty;
+  const base = currentSaleBaseTotal();
   const extra = parseFloat(document.getElementById('inst-extra').value)||0;
   const total = base + extra;
   const downInput = document.getElementById('inst-down');
@@ -137,7 +173,7 @@ function calcInstallment(){
 
 function calcCredit(){
   if(!_posProd) return;
-  const total = (_posProd.price||0) * _saleQty;
+  const total = currentSaleBaseTotal();
   const paidInput = document.getElementById('cred-paid');
   let paid = parseFloat(paidInput.value)||0;
   if(paid > total){
@@ -150,7 +186,10 @@ function calcCredit(){
 
 function confirmSale(){
   if(!_posProd) return;
-  const total = (_posProd.price||0) * _saleQty;
+  const unitPrice = currentSaleUnitPrice();
+  const unitCost = currentSaleUnitCost();
+  const baseTotal = unitPrice * _saleQty;
+  const baseProfit = Math.max(0, (unitPrice - unitCost) * _saleQty);
 
   if(_saleType==='cash'){
     // حفظ مبيعة كاش
@@ -159,7 +198,7 @@ function confirmSale(){
       id: genId(), productId: _posProd.id,
       productName: _posProd.name,
       type: 'cash', qty: _saleQty,
-      totalPaid: total, profit: (_posProd.profit||0)*_saleQty,
+      totalPaid: baseTotal, profit: baseProfit,
       date: nowISO()
     };
     sales.push(sale);
@@ -171,9 +210,9 @@ function confirmSale(){
       productName: _posProd.name,
       productId: _posProd.id,
       qty: _saleQty,
-      salePrice: total,
-      profit: (_posProd.profit||0) * _saleQty,
-      cost: (_posProd.cost||0) * _saleQty,
+      salePrice: baseTotal,
+      profit: baseProfit,
+      cost: unitCost * _saleQty,
       date: nowISO(),
       saleId: sale.id
     });
@@ -182,7 +221,7 @@ function confirmSale(){
     deductStock(_posProd.id, _saleQty);
 
     // تيليجرام
-    tg(`🛒 <b>بيع جديد</b>\nالمنتج: ${_posProd.name}\nالنوع: عادي كاش\nالكمية: ${_saleQty}\nالمبلغ: ${fmt(total)}\nالربح: ${fmt((_posProd.profit||0)*_saleQty)}\nالتاريخ: ${todayStr()}`);
+    tg(`🛒 <b>بيع جديد</b>\nالمنتج: ${_posProd.name}\nالنوع: عادي كاش\nالكمية: ${_saleQty}\nالمبلغ: ${fmt(baseTotal)}\nالربح: ${fmt(baseProfit)}\nالتاريخ: ${todayStr()}`);
 
     closeModal('pos-sale-ov');
     toast('✅ تم تسجيل البيع بنجاح');
@@ -198,20 +237,20 @@ function confirmSale(){
     if(!name){ toast('أدخل اسم الزبون','err'); return; }
     if(!months){ toast('أدخل عدد الأشهر','err'); return; }
 
-    const base = (_posProd.price||0) * _saleQty;
-    const total = base + extra;  // السعر + الربح الإضافي
-    if(down > total){ toast('⚠️ المقدم أكبر من إجمالي البيع','err'); return; }
-    const remain = Math.max(0, total - down);
+    const installmentBase = baseTotal;
+    const installmentTotal = installmentBase + extra;  // السعر + الربح الإضافي
+    if(down > installmentTotal){ toast('⚠️ المقدم أكبر من إجمالي البيع','err'); return; }
+    const remain = Math.max(0, installmentTotal - down);
     const monthly = remain > 0 ? Math.ceil(remain / months) : 0;
-    const totalProfit = ((_posProd.profit||0) * _saleQty) + extra;
+    const totalProfit = baseProfit + extra;
 
     const inst = DB.get('installments');
     const rec = {
       id: genId(), productId: _posProd.id,
       productName: _posProd.name,
       customerName: name, phone,
-      totalPrice: total,
-      basePrice: base,
+      totalPrice: installmentTotal,
+      basePrice: installmentBase,
       extraProfit: extra,
       downPayment: down,
       months, monthlyPayment: monthly,
@@ -222,8 +261,8 @@ function confirmSale(){
         id:_posProd.id,
         name:_posProd.name || '',
         qty:_saleQty,
-        price:parseFloat(_posProd.price)||0,
-        cost:parseFloat(_posProd.cost)||0
+        price:unitPrice,
+        cost:unitCost
       }],
       paidMonths: 0, payments: down>0?[{amount:down,date:nowISO()}]:[],
       barcode13: genRandom13(),
@@ -234,7 +273,7 @@ function confirmSale(){
 
     deductStock(_posProd.id, _saleQty);
 
-    tg(`📅 <b>بيع بالتقسيط</b>\nالزبون: ${name}\nالمنتج: ${_posProd.name}\nالسعر الأصلي: ${fmt(base)}\nالربح الإضافي: ${fmt(extra)}\nالإجمالي: ${fmt(total)}\nالمقدم: ${fmt(down)}\nالقسط: ${fmt(monthly)}/شهر × ${months}\nالتاريخ: ${todayStr()}`);
+    tg(`📅 <b>بيع بالتقسيط</b>\nالزبون: ${name}\nالمنتج: ${_posProd.name}\nالسعر الأصلي: ${fmt(installmentBase)}\nالربح الإضافي: ${fmt(extra)}\nالإجمالي: ${fmt(installmentTotal)}\nالمقدم: ${fmt(down)}\nالقسط: ${fmt(monthly)}/شهر × ${months}\nالتاريخ: ${todayStr()}`);
 
     const instSaleId = genId();
     const sales = DB.get('sales');
@@ -248,7 +287,7 @@ function confirmSale(){
     DB.addTransaction({
       type:'installment', productName:_posProd.name, productId:_posProd.id,
       customerName:name, qty:_saleQty,
-      salePrice:total, profit:totalProfit, cost:(_posProd.cost||0)*_saleQty,
+      salePrice:installmentTotal, profit:totalProfit, cost:unitCost*_saleQty,
       downPayment:down, months, monthlyPayment:monthly,
       date:nowISO(), saleId:instSaleId
     });
@@ -263,18 +302,18 @@ function confirmSale(){
     const paid = parseFloat(document.getElementById('cred-paid').value)||0;
 
     if(!name){ toast('أدخل اسم الزبون','err'); return; }
-    if(paid > total){ toast('⚠️ المبلغ المدفوع أكبر من إجمالي الدين','err'); return; }
+    if(paid > baseTotal){ toast('⚠️ المبلغ المدفوع أكبر من إجمالي الدين','err'); return; }
 
     const debts = DB.get('debts');
-    const totalProfit = (_posProd.profit||0) * _saleQty;
-    const initialProfit = total > 0 ? Math.round((totalProfit / total) * paid) : 0;
+    const totalProfit = baseProfit;
+    const initialProfit = baseTotal > 0 ? Math.round((totalProfit / baseTotal) * paid) : 0;
     const rec = {
       id: genId(), productId: _posProd.id,
       productName: _posProd.name,
       customerName: name, phone,
       reason: 'شراء '+_posProd.name,
-      totalDebt: total,
-      paid, remaining: Math.max(0, total-paid),
+      totalDebt: baseTotal,
+      paid, remaining: Math.max(0, baseTotal-paid),
       profit: totalProfit,
       barcode13: genRandom13(),
       date: nowISO(), lastUpdate: nowISO(),
@@ -283,8 +322,8 @@ function confirmSale(){
         id:_posProd.id,
         name:_posProd.name || '',
         qty:_saleQty,
-        price:parseFloat(_posProd.price)||0,
-        cost:parseFloat(_posProd.cost)||0
+        price:unitPrice,
+        cost:unitCost
       }],
       payments: paid>0?[{amount:paid,date:nowISO()}]:[]
     };
@@ -295,15 +334,15 @@ function confirmSale(){
     deductStock(_posProd.id, _saleQty);
 
     // تيليجرام
-    tg(`💳 <b>بيع كريدي (دين)</b>\nالزبون: ${name}\nالمنتج: ${_posProd.name}\nالإجمالي: ${fmt(total)}\nدفع: ${fmt(paid)}\nمتبقي: ${fmt(total-paid)}\nالتاريخ: ${todayStr()}`);
+    tg(`💳 <b>بيع كريدي (دين)</b>\nالزبون: ${name}\nالمنتج: ${_posProd.name}\nالإجمالي: ${fmt(baseTotal)}\nدفع: ${fmt(paid)}\nمتبقي: ${fmt(baseTotal-paid)}\nالتاريخ: ${todayStr()}`);
 
     // حفظ في المبيعات + Transaction
     const credSaleId = genId();
     DB.addTransaction({
       type:'credit', productName:_posProd.name, productId:_posProd.id,
       customerName:name, qty:_saleQty,
-      salePrice:total, profit:initialProfit, cost:(_posProd.cost||0)*_saleQty,
-      totalDebt:total, downPayment:paid, remaining:Math.max(0,total-paid),
+      salePrice:baseTotal, profit:initialProfit, cost:unitCost*_saleQty,
+      totalDebt:baseTotal, downPayment:paid, remaining:Math.max(0,baseTotal-paid),
       date:nowISO(), saleId:credSaleId
     });
     const sales = DB.get('sales');

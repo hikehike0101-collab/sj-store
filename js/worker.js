@@ -5,11 +5,17 @@
 // ① تحويل البيانات من عامل واحد إلى مصفوفة
 function getWorkers(){
   try{
-    // إذا البيانات الجديدة موجودة
-    const hasNewStorage = localStorage.getItem('sj_workers');
     const data = DB.get('workers');
-    if(hasNewStorage && Array.isArray(data)) return data;
-    // ترحيل البيانات القديمة
+    if(Array.isArray(data) && data.length) return data;
+    if(typeof readPendingOps === 'function'){
+      const pendingWorkers = readPendingOps()
+        .filter(op => op?.col === 'workers' && op.type === 'set' && op.data)
+        .map(op => window.normalizeRecord ? normalizeRecord('workers', op.data) : op.data);
+      if(pendingWorkers.length){
+        DB.set('workers', pendingWorkers);
+        return pendingWorkers;
+      }
+    }
     const old = JSON.parse(localStorage.getItem('sj_worker')||'null');
     if(old && old.name){
       const workers = [normalizeRecord('workers', {...old, id: old.id||genId()})];
@@ -17,7 +23,7 @@ function getWorkers(){
       localStorage.removeItem('sj_worker');
       return workers;
     }
-    return [];
+    return Array.isArray(data) ? data : [];
   }catch(e){ return []; }
 }
 
@@ -37,6 +43,36 @@ function saveWorkerData(w){
   saveWorkers(workers);
 }
 
+function getWorkerMonthKey(date){
+  const d = new Date(date || nowISO());
+  return `${d.getFullYear()}-${d.getMonth()+1}`;
+}
+
+function recalculateWorkerBalances(worker, salaryOverride = null){
+  const salary = salaryOverride ?? (worker.salary || 0);
+  const resetMonth = worker.lastResetMonth || getWorkerMonthKey(nowISO());
+  let runningRemaining = salary;
+  const withdrawals = [...(worker.withdrawals || [])]
+    .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
+    .map((item) => {
+      const amount = item.amount || 0;
+      if(getWorkerMonthKey(item.date) === resetMonth){
+        runningRemaining = Math.max(0, runningRemaining - amount);
+        return { ...item, remainingAfter: runningRemaining };
+      }
+      return item;
+    });
+
+  return {
+    ...worker,
+    salary,
+    lastResetMonth: resetMonth,
+    remaining: runningRemaining,
+    withdrawals
+  };
+}
+
+
 // تجديد راتب العمال كل شهر تلقائياً
 function checkWorkerMonthlyReset(){
   const workers = getWorkers();
@@ -46,8 +82,10 @@ function checkWorkerMonthlyReset(){
   let changed = false;
   workers.forEach(w=>{
     if(w.salary && w.lastResetMonth !== month){
-      w.remaining      = w.salary;
       w.lastResetMonth = month;
+      const refreshed = recalculateWorkerBalances(w, w.salary);
+      w.remaining = refreshed.remaining;
+      w.withdrawals = refreshed.withdrawals;
       changed = true;
     }
   });
@@ -161,8 +199,8 @@ function saveWorker(){
     const idx = workers.findIndex(x=>x.id===editId);
     if(idx>=0){
       workers[idx].name   = fname+' '+lname;
-      workers[idx].salary = salary;
       if(!workers[idx].lastResetMonth) workers[idx].lastResetMonth = month;
+      workers[idx] = recalculateWorkerBalances(workers[idx], salary);
     }
   } else {
     // إضافة عامل جديد (حد أقصى 2)
@@ -211,7 +249,7 @@ function openWorkerWithdraw(workerId){
 
 function confirmWorkerWithdraw(){
   const workerId = document.getElementById('wd-worker-id').value;
-  const w        = getWorkerById(workerId);
+  let w          = getWorkerById(workerId);
   if(!w) return;
   const amount = parseFloat(document.getElementById('wd-amount').value)||0;
   const note   = document.getElementById('wd-note').value.trim();
@@ -219,26 +257,21 @@ function confirmWorkerWithdraw(){
   if(!amount) { toast('أدخل المبلغ','err'); return; }
   if(amount > (w.remaining||0)) { toast('⚠️ المبلغ أكبر من المتبقي في الراتب!','err'); return; }
 
-  // التحقق من الأرباح المتاحة
-  const c = calcAll(getFilterDate());
-  const availableProfit = Math.max(0, c.totalProfit);
-  if(amount > availableProfit){
-    toast(`⚠️ المبلغ أكبر من الأرباح المتاحة (${fmt(availableProfit)})!`, 'warn');
-    return;
-  }
-
   w.remaining = (w.remaining||0) - amount;
   w.withdrawals = [...(w.withdrawals||[]), {
     amount, note,
     remainingAfter: w.remaining,
     date: nowISO()
   }];
+  w = recalculateWorkerBalances(w, w.salary || 0);
   saveWorkerData(w);
 
   const sales = DB.get('sales');
   sales.push({
     id:genId(),
     productName:'سحب عامل — '+(note||w.name),
+    workerId: w.id,
+    workerName: w.name,
     type:'worker_withdrawal',
     qty:1, totalPaid:0,
     profit: -amount,
@@ -254,8 +287,7 @@ function confirmWorkerWithdraw(){
 }
 
 function openOwnerWithdraw(){
-  const from = getFilterDate();
-  const c = calcAll(from);
+  const c = calcAll(null);
   const availableProfit = Math.max(0, c.totalProfit);
   document.getElementById('ow-profit-display').textContent = fmt(availableProfit);
   document.getElementById('ow-profit-display').dataset.profit = availableProfit;

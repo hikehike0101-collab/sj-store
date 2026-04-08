@@ -6,6 +6,8 @@
   "author": "SJ STORE",
   "license": "MIT",
   "scripts": {
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild:native": "electron-builder install-app-deps",
     "start": "electron .",
     "build": "electron-builder --win --x64",
     "release": "electron-builder --win --x64 --publish always"
@@ -50,6 +52,8 @@
     },
     "files": [
       "main.js",
+      "preload.js",
+      "sqlite-service.js",
       "package.json",
       "index.html",
       "icon.ico",
@@ -64,11 +68,13 @@
     "compression": "maximum",
     "asar": true,
     "asarUnpack": [
-      "libs/**"
+      "libs/**",
+      "node_modules/better-sqlite3/**"
     ],
     "electronVersion": "28.3.3"
   },
   "dependencies": {
+    "better-sqlite3": "^11.10.0",
     "electron-updater": "^6.8.3",
     "pdfjs-dist": "^5.6.205"
   }

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
+const { ensureDb, registerSqliteIpc, closeSqlite } = require('./sqlite-service');
 
 // تقليل استهلاك الذاكرة قدر الإمكان داخل Electron.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
@@ -145,6 +146,7 @@ function createWindow() {
     minHeight: 600,
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: true,
@@ -293,6 +295,8 @@ function setupAutoUpdates(win) {
 }
 
 app.whenReady().then(() => {
+  ensureDb();
+  registerSqliteIpc();
   const win = createWindow();
   setupAutoUpdates(win);
 });
@@ -303,4 +307,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.commandLine.appendSwitch('purge-memory-button');
+  closeSqlite();
 });

@@ -7,6 +7,7 @@ const APP_COLLECTIONS = Object.freeze([
   'installments',
   'debts',
   'repairs',
+  'warranties',
   'workers'
 ]);
 
@@ -17,6 +18,7 @@ const APP_SCHEMA = Object.freeze({
   installments: { entity: 'installment' },
   debts:        { entity: 'debt' },
   repairs:      { entity: 'repair' },
+  warranties:   { entity: 'warranty' },
   workers:      { entity: 'worker' }
 });
 
