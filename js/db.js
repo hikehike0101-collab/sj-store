@@ -2,6 +2,7 @@
 
 // ====== DATA + CACHE (Firestore + localStorage) ======
 const _cache = {};
+const _baseline = {};
 let _sqliteReady = false;
 let _sqliteLastImportedUid = null;
 let _sqliteStatusCache = new Map();
@@ -56,6 +57,11 @@ function sqliteApi() {
 function canReadSqliteSync() {
   const api = sqliteApi();
   return !!api?.getCollectionSync;
+}
+
+function canWriteSqliteSync() {
+  const api = sqliteApi();
+  return !!api?.putCollectionSync;
 }
 
 function canReadSqliteQueueSync() {
@@ -148,13 +154,18 @@ window.importCurrentLocalStateToSqlite = async function importCurrentLocalStateT
   if (!uid) return false;
   if (!(await ensureSqliteReady())) return false;
   const api = sqliteApi();
-  if (!api?.importLocalSnapshot) return false;
   const snapshot = {};
   appCollections().forEach((col) => {
     snapshot[col] = normalizeCollectionList(col, readLocalCollectionSource(col));
   });
   try {
-    await api.importLocalSnapshot(uid, snapshot);
+    if (api?.importLocalSnapshotSync) {
+      const result = api.importLocalSnapshotSync(uid, snapshot);
+      if (!result?.ok) return false;
+    } else {
+      if (!api?.importLocalSnapshot) return false;
+      await api.importLocalSnapshot(uid, snapshot);
+    }
     _sqliteLastImportedUid = uid;
     _sqliteStatusCache.delete(uid);
     return true;
@@ -180,9 +191,14 @@ async function mirrorCollectionToSqlite(col, records) {
   if (!uid || !Array.isArray(records)) return;
   if (!(await ensureSqliteReady())) return;
   const api = sqliteApi();
-  if (!api?.putCollection) return;
   try {
-    await api.putCollection(uid, col, records);
+    if (canWriteSqliteSync()) {
+      const result = api.putCollectionSync(uid, col, records);
+      if (!result?.ok) throw new Error(result?.reason || 'sqlite_put_failed');
+    } else {
+      if (!api?.putCollection) return;
+      await api.putCollection(uid, col, records);
+    }
     _sqliteStatusCache.delete(uid);
   } catch (e) {
     console.warn(`mirrorCollectionToSqlite [${col}]:`, e.message);
@@ -194,6 +210,14 @@ function readLocalCollectionSource(col) {
   const sqliteRecords = readSqliteCollectionSync(col);
   if (Array.isArray(sqliteRecords)) return sqliteRecords;
   return [];
+}
+
+function cloneRecords(items) {
+  try {
+    return JSON.parse(JSON.stringify(Array.isArray(items) ? items : []));
+  } catch {
+    return Array.isArray(items) ? items.map(item => ({ ...item })) : [];
+  }
 }
 
 function normalizeCollectionList(col, items) {
@@ -292,6 +316,12 @@ function mergeCollectionRecords(col, localItems, cloudItems) {
 
     if (cloud) {
       merged.push(cloud);
+      return;
+    }
+
+    if (local) {
+      merged.push(local);
+      queuePendingOp({ type: 'set', col, id, data: local });
     }
   });
 
@@ -299,7 +329,10 @@ function mergeCollectionRecords(col, localItems, cloudItems) {
 }
 
 window.clearUserDataCache = function() {
-  appCollections().forEach(col => delete _cache[col]);
+  appCollections().forEach(col => {
+    delete _cache[col];
+    delete _baseline[col];
+  });
   _sqliteStatusCache.clear();
 };
 
@@ -404,6 +437,7 @@ async function syncFromFirestore() {
         const localData = readLocalCollectionSource(col);
         const merged = mergeCollectionRecords(col, localData, cloudData);
         _cache[col] = merged;
+        _baseline[col] = cloneRecords(merged);
         sqliteSnapshot[col] = merged;
         totalDocs += merged.length;
       } catch (e) {
@@ -471,15 +505,17 @@ const DB = {
 
     if (Array.isArray(sqliteRecords) && (sqliteRecords.length || sqliteHasKnownState)) {
       _cache[k] = normalizeCollectionList(k, sqliteRecords);
+      _baseline[k] = cloneRecords(_cache[k]);
       return _cache[k];
     }
     _cache[k] = [];
+    _baseline[k] = [];
     return _cache[k];
   },
 
   set(k, v) {
     k = window.normalizeCollectionName ? normalizeCollectionName(k) : k;
-    const prev = normalizeCollectionList(k, readLocalCollectionSource(k));
+    const prev = normalizeCollectionList(k, _baseline[k] !== undefined ? _baseline[k] : readLocalCollectionSource(k));
     if (Array.isArray(v)) {
       const prevMap = new Map(prev.filter(item => item && item.id).map(item => [String(item.id), item]));
       const changedItems = [];
@@ -495,6 +531,7 @@ const DB = {
         return prevItem || normalized;
       });
       _cache[k] = v;
+      _baseline[k] = cloneRecords(v);
       mirrorCollectionToSqlite(k, v);
       const nextIds = new Set(v.filter(item => item && item.id).map(item => String(item.id)));
       prev.forEach(item => {
@@ -519,6 +556,7 @@ const DB = {
     item = stampRecordForWrite(col, item, prevItem);
     if (idx >= 0) arr[idx] = item; else arr.push(item);
     _cache[col] = arr;
+    _baseline[col] = cloneRecords(arr);
     mirrorCollectionToSqlite(col, arr);
     fsSaveDoc(col, item.id, item);
     return item;
@@ -528,6 +566,7 @@ const DB = {
     col = window.normalizeCollectionName ? normalizeCollectionName(col) : col;
     const arr = DB.get(col).filter(x => x.id !== id);
     _cache[col] = arr;
+    _baseline[col] = cloneRecords(arr);
     mirrorCollectionToSqlite(col, arr);
     fsDeleteDoc(col, id);
   },
@@ -541,6 +580,7 @@ const DB = {
     const arr = DB.get('transactions');
     arr.push(tx);
     _cache.transactions = arr;
+    _baseline.transactions = cloneRecords(arr);
     mirrorCollectionToSqlite('transactions', arr);
     fsSaveDoc('transactions', tx.id, tx);
     return tx;
@@ -565,11 +605,13 @@ const DB = {
   clear(k) {
     k = window.normalizeCollectionName ? normalizeCollectionName(k) : k;
     delete _cache[k];
+    delete _baseline[k];
     delete _cache['_obj_' + k];
   },
 
   clearAll() {
     Object.keys(_cache).forEach(k => delete _cache[k]);
+    Object.keys(_baseline).forEach(k => delete _baseline[k]);
   }
 };
 

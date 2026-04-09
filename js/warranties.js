@@ -123,13 +123,15 @@ window.confirmWarrantySale = async function confirmWarrantySale() {
 
   const form = warrantyFormData('warr');
   if (!form.customerName) { toast('أدخل اسم الزبون', 'err'); return; }
+  if (!form.phone) { toast('أدخل رقم الهاتف', 'err'); return; }
   if (!form.duration) { toast('أدخل مدة الضمان', 'err'); return; }
+  if (typeof ensureSaleStockAvailable === 'function' && !ensureSaleStockAvailable()) return;
 
   const qty = typeof _saleQty === 'number' ? _saleQty : 1;
   const unitPrice = typeof currentSaleUnitPrice === 'function' ? currentSaleUnitPrice() : Number(_posProd.price || 0);
   const unitCost = typeof currentSaleUnitCost === 'function' ? currentSaleUnitCost() : Number(_posProd.cost || 0);
   const totalPrice = unitPrice * qty;
-  const profit = Math.max(0, (unitPrice - unitCost) * qty);
+  const profit = totalPrice - (unitCost * qty);
   const saleDate = nowISO();
   const saleId = genId();
   const warrantyId = genId();
@@ -197,7 +199,7 @@ window.confirmWarrantySale = async function confirmWarrantySale() {
     productSnapshot: buildWarrantyProductSnapshot(_posProd, unitPrice)
   });
 
-  if (typeof deductStock === 'function') deductStock(_posProd.id, qty);
+  if (typeof deductStock === 'function' && !deductStock(_posProd.id, qty)) return;
 
   tg(`🛡️ <b>بيع ضمان جديد</b>\nالزبون: ${form.customerName}\nالمنتج: ${_posProd.name}\nالكمية: ${qty}\nالمبلغ: ${fmt(totalPrice)}\nمدة الضمان: ${form.duration}\nالتاريخ: ${todayStr()}`);
 

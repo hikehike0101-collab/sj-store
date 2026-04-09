@@ -597,12 +597,29 @@
     if (active.id === 'auth-sec-forgot') window.authDoForgot?.();
   });
 
-  window.addEventListener('online', () => {
+  let reconnectSyncInFlight = null;
+
+  window.addEventListener('online', async () => {
+    const uid = currentUserUid();
     if (hasOfflineSession()) setSyncIndicator('syncing');
     tryInitAuthRuntime();
-    if (window._fsReady && window._fsUid) {
-      window.flushPendingFirestoreOps?.();
-    }
+
+    if (!uid || !window._fsReady || !window._fsUid || window._fsUid !== uid) return;
+    if (reconnectSyncInFlight) return reconnectSyncInFlight;
+
+    reconnectSyncInFlight = (async () => {
+      try {
+        const synced = await initFirestore(uid);
+        applySyncResult(synced);
+      } catch (e) {
+        console.warn('online re-sync:', e?.message || e);
+        setSyncIndicator('offline', offlineSyncMessage());
+      } finally {
+        reconnectSyncInFlight = null;
+      }
+    })();
+
+    return reconnectSyncInFlight;
   });
 
   window.addEventListener('offline', () => {

@@ -137,6 +137,10 @@ function importLocalSnapshot(uid, snapshot = {}) {
   return { ok: true, importedCollections };
 }
 
+function importLocalSnapshotSync(uid, snapshot = {}) {
+  return importLocalSnapshot(uid, snapshot);
+}
+
 function queueSyncOp(uid, col, id, opType, payload = null) {
   const userId = safeUid(uid);
   const collection = normalizeCollection(col);
@@ -327,6 +331,30 @@ function registerSqliteIpc() {
       event.returnValue = {
         ok: false,
         reason: e.message || 'sqlite_status_failed'
+      };
+    }
+  });
+
+  ipcMain.on('sqlite:import-local-snapshot-sync', (event, uid, snapshot) => {
+    try {
+      event.returnValue = importLocalSnapshotSync(uid, snapshot);
+    } catch (e) {
+      event.returnValue = {
+        ok: false,
+        importedCollections: 0,
+        reason: e.message || 'sqlite_import_failed'
+      };
+    }
+  });
+
+  ipcMain.on('sqlite:put-collection-sync', (event, uid, col, records) => {
+    try {
+      event.returnValue = putCollectionSnapshot(uid, col, records);
+    } catch (e) {
+      event.returnValue = {
+        ok: false,
+        count: 0,
+        reason: e.message || 'sqlite_put_failed'
       };
     }
   });

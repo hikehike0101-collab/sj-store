@@ -274,7 +274,7 @@ window.clearAllData = function clearAllData(){
       cols.forEach(col => {
         try { DB.set(col, []); } catch {}
       });
-      try { DB.clearAll(); } catch {}
+      await window.importCurrentLocalStateToSqlite?.(currentUserUid());
 
       if (window._fsReady && window._fs && window._fsUid) {
         try {

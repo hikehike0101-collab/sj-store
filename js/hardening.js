@@ -449,6 +449,7 @@
       const cfg = execMap[page];
       if (!cfg) return;
       try { DB.set(cfg.col, []); } catch {}
+      await window.importCurrentLocalStateToSqlite?.(currentUserUid());
       await clearFirestoreCollection(cfg.col);
       cfg.render();
       toast(`✅ تم حذف بيانات ${name} بنجاح`);
