@@ -16,20 +16,12 @@ function getWorkers(){
         return pendingWorkers;
       }
     }
-    const old = JSON.parse(localStorage.getItem('sj_worker')||'null');
-    if(old && old.name){
-      const workers = [normalizeRecord('workers', {...old, id: old.id||genId()})];
-      DB.set('workers', workers);
-      localStorage.removeItem('sj_worker');
-      return workers;
-    }
     return Array.isArray(data) ? data : [];
   }catch(e){ return []; }
 }
 
 function saveWorkers(arr){
   DB.set('workers', arr.map(w => window.normalizeRecord ? normalizeRecord('workers', w) : w));
-  localStorage.removeItem('sj_worker');
 }
 
 function getWorkerById(id){ return getWorkers().find(w=>w.id===id)||null; }

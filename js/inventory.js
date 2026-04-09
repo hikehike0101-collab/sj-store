@@ -1249,12 +1249,14 @@ async function printWarranty(p, overrideData = null) {
     "'":'&#39;'
   }[s]));
 
-  // قراءة البيانات من حقول الواجهة
-  const name     = document.getElementById('warr-name').value.trim();
-  const phone    = document.getElementById('warr-phone').value.trim();
-  const color    = document.getElementById('warr-color').value.trim();
-  const imei     = document.getElementById('warr-imei').value.trim();
-  const duration = document.getElementById('warr-duration').value.trim();
+  // استخدم بيانات السجل عند إعادة الطباعة، وحقول الواجهة فقط عند الطباعة من نافذة البيع.
+  const formValue = (id) => document.getElementById(id)?.value.trim() || '';
+  const source = overrideData || {};
+  const name     = String(source.name ?? formValue('warr-name')).trim();
+  const phone    = String(source.phone ?? formValue('warr-phone')).trim();
+  const color    = String(source.color ?? formValue('warr-color')).trim();
+  const imei     = String(source.imei ?? formValue('warr-imei')).trim();
+  const duration = String(source.duration ?? formValue('warr-duration')).trim();
 
   if (!name)    { toast('أدخل اسم الزبون', 'err'); return; }
   if (!duration){ toast('أدخل مدة الضمان', 'err');  return; }

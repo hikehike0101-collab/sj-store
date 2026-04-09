@@ -81,6 +81,7 @@
   }
 
   function bootAppFromCache() {
+    window.cleanupMigratedLegacyStorage?.();
     if (typeof renderTopDate === 'function') renderTopDate();
     if (typeof bootInitialPosPage === 'function') {
       bootInitialPosPage();
@@ -90,6 +91,9 @@
     setTimeout(() => {
       if (typeof renderPOS === 'function') renderPOS();
     }, 30);
+    if (typeof window.queueInstallmentReminderCheck === 'function') {
+      window.queueInstallmentReminderCheck();
+    }
   }
 
   function showAuthOverlay() {

@@ -88,17 +88,16 @@ function clearCurrentSessionState(){
 }
 
 function userScopedStorageKey(name, uid = currentUserUid()){
-  return uid ? `sj_user_${uid}_${name}` : `sj_${name}`;
+  return uid ? `sj_user_${uid}_${name}` : '';
 }
 
 function getUserSetting(name, fallback = ''){
   const uid = currentUserUid();
-  if(uid){
-    const scoped = localStorage.getItem(userScopedStorageKey(name, uid));
-    if(scoped !== null) return scoped;
-  }
-  const legacy = localStorage.getItem(`sj_${name}`);
-  return legacy !== null ? legacy : fallback;
+  if(!uid) return fallback;
+  const key = userScopedStorageKey(name, uid);
+  if(!key) return fallback;
+  const scoped = localStorage.getItem(key);
+  return scoped !== null ? scoped : fallback;
 }
 
 function setUserSetting(name, value, uid = currentUserUid()){
@@ -109,12 +108,10 @@ function setUserSetting(name, value, uid = currentUserUid()){
 
 function removeUserSetting(name, uid = currentUserUid()){
   if(uid) localStorage.removeItem(userScopedStorageKey(name, uid));
-  localStorage.removeItem(`sj_${name}`);
 }
 
 function hasUserSetting(name, uid = currentUserUid()){
-  if(uid && localStorage.getItem(userScopedStorageKey(name, uid)) !== null) return true;
-  return localStorage.getItem(`sj_${name}`) !== null;
+  return !!(uid && localStorage.getItem(userScopedStorageKey(name, uid)) !== null);
 }
 
 function normalizeTelegramMessage(msg=''){
@@ -128,7 +125,6 @@ function normalizeTelegramMessage(msg=''){
 
 // ====== TELEGRAM ======
 async function tg(msg){
-  window.migrateUserScopedSettings?.();
   if(getUserSetting('tg_disabled')==='1') return;
   const token  = getUserSetting('tg_token');
   const chatId = getUserSetting('tg_chatid');

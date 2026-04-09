@@ -10,10 +10,6 @@
     return userScopedStorageKey(DASHBOARD_PIN_UPDATED_AT_KEY, uid);
   }
 
-  function legacyDashboardPin() {
-    return (localStorage.getItem('sj_pwd') || '').trim();
-  }
-
   function storedDashboardPinHash(uid = currentUserUid()) {
     return uid ? (localStorage.getItem(dashboardPinKey(uid)) || '') : '';
   }
@@ -34,7 +30,7 @@
   }
 
   function dashboardPinEnabled() {
-    return !!storedDashboardPinHash() || !!legacyDashboardPin();
+    return !!storedDashboardPinHash();
   }
 
   async function dashboardPinCloudRef(uid = currentUserUid()) {
@@ -100,22 +96,9 @@
     return Array.from(new Uint8Array(digest)).map(n => n.toString(16).padStart(2, '0')).join('');
   }
 
-  async function migrateLegacyDashboardPin() {
-    const uid = currentUserUid();
-    const legacy = legacyDashboardPin();
-    if (!uid || !legacy) return;
-    if (!storedDashboardPinHash(uid)) {
-      const hashed = await hashDashboardPin(legacy, uid);
-      if (hashed) storeDashboardPinState(hashed, new Date().toISOString(), uid);
-    }
-    localStorage.removeItem('sj_pwd');
-  }
-
   async function syncDashboardPinState() {
     const uid = currentUserUid();
     if (!uid) return;
-
-    await migrateLegacyDashboardPin();
 
     const localHash = storedDashboardPinHash(uid);
     const localUpdatedAt = storedDashboardPinUpdatedAt(uid);
@@ -147,13 +130,6 @@
   async function verifyDashboardPin(pin) {
     const raw = String(pin || '').trim();
     if (!raw) return false;
-
-    const legacy = legacyDashboardPin();
-    if (legacy) {
-      const matchesLegacy = raw === legacy;
-      if (matchesLegacy) await migrateLegacyDashboardPin();
-      return matchesLegacy;
-    }
 
     const stored = storedDashboardPinHash();
     if (!stored) return false;
@@ -351,7 +327,6 @@
 
     const updatedAt = new Date().toISOString();
     storeDashboardPinState(hashed, updatedAt);
-    localStorage.removeItem('sj_pwd');
     await writeCloudDashboardPinState(hashed, updatedAt);
     closeModal('change-pwd-ov');
     window.refreshDashboardPasswordUI();
@@ -378,7 +353,6 @@
     }
 
     storeDashboardPinState('');
-    localStorage.removeItem('sj_pwd');
     await clearCloudDashboardPinState();
     closeModal('change-pwd-ov');
     window.refreshDashboardPasswordUI();

@@ -28,36 +28,12 @@ window.closeDeletePwd = function closeDeletePwd(){
 };
 
 function currentTelegramSettings(){
-  window.migrateUserScopedSettings?.();
   return {
     token: getUserSetting('tg_token'),
     chatId: getUserSetting('tg_chatid'),
     disabled: getUserSetting('tg_disabled') === '1'
   };
 }
-
-window.migrateUserScopedSettings = function migrateUserScopedSettings(){
-  const uid = currentUserUid();
-  if (!uid) return;
-
-  const legacyToken = localStorage.getItem('sj_tg_token');
-  const legacyChatId = localStorage.getItem('sj_tg_chatid');
-  const legacyDisabled = localStorage.getItem('sj_tg_disabled');
-
-  if (legacyToken !== null && !hasUserSetting('tg_token', uid)) {
-    setUserSetting('tg_token', legacyToken, uid);
-  }
-  if (legacyChatId !== null && !hasUserSetting('tg_chatid', uid)) {
-    setUserSetting('tg_chatid', legacyChatId, uid);
-  }
-  if (legacyDisabled !== null && !hasUserSetting('tg_disabled', uid)) {
-    setUserSetting('tg_disabled', legacyDisabled, uid);
-  }
-
-  localStorage.removeItem('sj_tg_token');
-  localStorage.removeItem('sj_tg_chatid');
-  localStorage.removeItem('sj_tg_disabled');
-};
 
 window.switchAccTab = function switchAccTab(tab){
   document.getElementById('acc-tab-pwd')?.classList.toggle('active', tab === 'pwd');
@@ -152,7 +128,6 @@ window.forceImportCurrentStateToSqlite = async function forceImportCurrentStateT
 };
 
 window.renderSettings = function renderSettings(){
-  window.migrateUserScopedSettings?.();
   window.refreshStorageEngineStatus?.();
 
   const emailEl = document.getElementById('settings-email-display');

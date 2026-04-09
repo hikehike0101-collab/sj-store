@@ -249,7 +249,170 @@ function openInstPrint(id){
   printInstNewLabel();
 }
 
-function printInstNewLabel(){
+const INSTALLMENT_CONTRACT_IMAGE_URL = 'assets/وثيقة تقسيط.png';
+
+function fmtInstallmentContractDate(value){
+  if(!value) return '........';
+  const d = new Date(value);
+  if(Number.isNaN(d.getTime())) return '........';
+  return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+}
+
+function addMonthsToDate(value, monthsToAdd = 0){
+  const d = new Date(value || nowISO());
+  if(Number.isNaN(d.getTime())) return '';
+  d.setMonth(d.getMonth() + (parseInt(monthsToAdd, 10) || 0));
+  return d.toISOString();
+}
+
+function installmentContractProductSerial(i){
+  const direct = String(i?.imei || i?.barcode || i?.serialNo || '').trim();
+  if(direct) return direct;
+
+  if(i?.productId){
+    const product = DB.get('products').find((item) => item.id === i.productId);
+    const value = String(product?.barcode || product?.serialNo || '').trim();
+    if(value) return value;
+  }
+
+  const selectedProductId = i?.selectedProducts?.[0]?.id;
+  if(selectedProductId){
+    const product = DB.get('products').find((item) => item.id === selectedProductId);
+    const value = String(product?.barcode || product?.serialNo || '').trim();
+    if(value) return value;
+  }
+
+  return '........';
+}
+
+function installmentContractPayload(i){
+  const startDate = i?.date || nowISO();
+  const endDate = addMonthsToDate(startDate, i?.months || 0);
+  const money = (value) => `${num(value || 0)} DA`;
+  return {
+    productName: String(i?.productName || '........').trim() || '........',
+    imei: installmentContractProductSerial(i),
+    totalPrice: money(i?.totalPrice || 0),
+    downPayment: money(i?.downPayment ?? (i?.payments?.[0]?.amount || 0)),
+    remaining: money(i?.remaining || 0),
+    startDate: fmtInstallmentContractDate(startDate),
+    endDate: fmtInstallmentContractDate(endDate),
+    monthlyPayment: money(i?.monthlyPayment || 0),
+    paidMonths: String(i?.paidMonths ?? 0),
+    paidMonthsLabel: `${i?.paidMonths ?? 0}`,
+    warrantyDuration: String(i?.warrantyDuration || i?.duration || '').trim() || '........'
+  };
+}
+
+function escapeInstallmentContractHtml(value){
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+function printInstallmentContract(i){
+  if(!i) return;
+  const buildSheet = (leftMm) => `
+    <div class="sheet" style="left:${leftMm}mm">
+      <div class="bg-wrap">
+        <img class="bg" src="${INSTALLMENT_CONTRACT_IMAGE_URL}" alt="وثيقة التقسيط">
+      </div>
+    </div>`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+@page { size: A4 landscape; margin: 0; }
+*{ box-sizing:border-box; }
+html,body{
+  margin:0;
+  width:100%;
+  height:100%;
+  background:#fff;
+  -webkit-print-color-adjust:exact;
+  print-color-adjust:exact;
+}
+body{ font-family:Arial,sans-serif; }
+.page{
+  position:relative;
+  width:297mm;
+  height:210mm;
+  overflow:hidden;
+  background:#fff;
+}
+.sheet{
+  position:absolute;
+  top:6.25mm;
+  width:130mm;
+  height:197.5mm;
+  overflow:hidden;
+}
+.bg-wrap{
+  position:absolute;
+  left:0;
+  top:0;
+  width:130mm;
+  height:197.5mm;
+  transform-origin:top left;
+  transform:translateX(130mm) rotate(90deg);
+}
+.bg{
+  position:absolute;
+  left:0;
+  top:0;
+  width:197.5mm;
+  height:130mm;
+  object-fit:fill;
+  image-orientation:none;
+}
+</style>
+</head>
+<body>
+  <div class="page">
+    ${buildSheet(14.5)}
+    ${buildSheet(152.5)}
+  </div>
+</body>
+</html>`;
+
+  let iframe = document.getElementById('print-installment-contract-iframe');
+  if(iframe) iframe.remove();
+  iframe = document.createElement('iframe');
+  iframe.id = 'print-installment-contract-iframe';
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:29.7cm;height:21cm;border:none;visibility:hidden';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    try{
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    }catch(e){
+      const w = window.open('', '_blank');
+      if(w){
+        w.document.write(html);
+        w.document.close();
+        w.onload = () => {
+          w.print();
+          setTimeout(() => w.close(), 1000);
+        };
+      }
+    }
+    setTimeout(() => { if(iframe) iframe.remove(); }, 4000);
+  }, 600);
+}
+
+function printInstLegacyLabelUnused(){
   if(!_instTarget) return;
   waitForJsBarcode(()=>{
     const i = _instTarget;
@@ -316,7 +479,7 @@ function printInstNewLabel(){
   });
 }
 
-function printInstInfo(){
+function printInstLegacyInfoUnused(){
   if(!_instTarget) return;
   closeModal('inst-print-ov');
   const i = _instTarget;
@@ -338,6 +501,18 @@ function printInstInfo(){
   </div>`;
   doPrint(html, '6.5cm', '9cm');
 }
+
+function printInstNewLabel(){
+  if(!_instTarget) return;
+  printInstallmentContract(_instTarget);
+}
+
+function printInstInfo(){
+  if(!_instTarget) return;
+  closeModal('inst-print-ov');
+  printInstallmentContract(_instTarget);
+}
+
 function printInstBarcode(){
   if(!_instTarget) return;
   waitForJsBarcode(() => {

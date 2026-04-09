@@ -92,9 +92,20 @@ window.bootInitialPosPage = function bootInitialPosPage() {
   setTimeout(renderPOS, 10);
 };
 
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(checkInstallmentReminders, 3000);
+let _installmentReminderBootQueued = false;
+window.queueInstallmentReminderCheck = function queueInstallmentReminderCheck() {
+  if (_installmentReminderBootQueued) return;
+  _installmentReminderBootQueued = true;
+  setTimeout(() => {
+    try {
+      if (typeof checkInstallmentReminders === 'function') checkInstallmentReminders();
+    } finally {
+      _installmentReminderBootQueued = false;
+    }
+  }, 1200);
+};
 
+document.addEventListener('DOMContentLoaded', () => {
   setInterval(() => {
     const activeId = document.querySelector('.page.active')?.id?.replace('page-', '');
     Object.keys(_cache).forEach((key) => {
