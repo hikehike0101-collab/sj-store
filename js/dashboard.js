@@ -258,6 +258,7 @@ function calcAll(range=null){
   // سحوبات العامل والمالك
   const workerCost = sales.filter(s=> s.type==='worker_withdrawal' && inRange(s.date)).reduce((a,s)=>a+Math.abs(s.profit||0),0);
   const ownerCost  = sales.filter(s=> s.type==='owner_withdrawal'  && inRange(s.date)).reduce((a,s)=>a+Math.abs(s.profit||0),0);
+  const ownerCapitalWithdrawals = sales.filter(s=> s.type==='owner_capital_withdrawal' && inRange(s.date)).reduce((a,s)=>a+Math.abs(s.profit||0),0);
 
   const totalProfit = cashProfit + warrantyProfit + instProfit + debtProfit + repairProfit - workerCost - ownerCost;
 
@@ -306,7 +307,7 @@ function calcAll(range=null){
   // تصليح: لا يدخل في رأس مال صاحب المحل — المصلّح يتحمل تكاليفه
   const repairsCapital = 0;
 
-  const totalCapital = cashCapital + warrantyCapital + instCapital + debtCapital + repairsCapital;
+  const totalCapital = cashCapital + warrantyCapital + instCapital + debtCapital + repairsCapital - ownerCapitalWithdrawals;
 
   return { totalCollected, totalProfit, instRemain, debtRemain, totalCapital };
 }
@@ -338,9 +339,9 @@ function renderDashboard(){
   const recentSales = allSales.map(s=>({
     saleId: s.id,
     name: s.productName,
-    type: s.type==='installment'?'تقسيط': s.type==='installment_payment'?'دفعة قسط': s.type==='credit'?'كريدي': s.type==='debt_payment'?'دفعة دين': s.type==='owner_withdrawal'?'سحب أرباح': s.type==='worker_withdrawal'?'سحب عامل':'كاش',
+    type: s.type==='installment'?'تقسيط': s.type==='installment_payment'?'دفعة قسط': s.type==='credit'?'كريدي': s.type==='debt_payment'?'دفعة دين': s.type==='owner_withdrawal'?'سحب أرباح': s.type==='owner_capital_withdrawal'?'سحب رأس المال': s.type==='worker_withdrawal'?'سحب عامل':'كاش',
     typeKey: s.type, qty: s.qty||1,
-    paid: (s.type==='owner_withdrawal'||s.type==='worker_withdrawal') ? Math.abs(s.profit||0) : (s.totalPaid||0),
+    paid: (s.type==='owner_withdrawal'||s.type==='owner_capital_withdrawal'||s.type==='worker_withdrawal') ? Math.abs(s.profit||0) : (s.totalPaid||0),
     productId: s.productId||'',
     date: s.date
   }));
@@ -360,7 +361,7 @@ function renderDashboard(){
     return;
   }
   tbody.innerHTML = allRecent.map(r=>{
-    const badgeMap={installment:'badge-orange',installment_payment:'badge-orange',credit:'badge-red',debt_payment:'badge-red',cash:'badge-green',repair:'badge-blue',owner_withdrawal:'badge-purple',worker_withdrawal:'badge-orange'};
+    const badgeMap={installment:'badge-orange',installment_payment:'badge-orange',credit:'badge-red',debt_payment:'badge-red',cash:'badge-green',repair:'badge-blue',owner_withdrawal:'badge-purple',owner_capital_withdrawal:'badge-purple',worker_withdrawal:'badge-orange'};
     badgeMap.warranty = 'badge-blue';
     const d=new Date(r.date);
     const timeStr=`${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')} — ${d.getDate()}/${d.getMonth()+1}`;
@@ -385,6 +386,8 @@ function returnSale(saleId, typeKey){
   const sale  = sales.find(s=>s.id===saleId);
   if(!sale){ toast('⚠️ لم يُعثر على العملية','warn'); return; }
 
+  const removeById = (items = [], id) => items.filter(item => item?.id !== id);
+
   const restoreProductsToStock = (items = []) => {
     if(!items.length) return false;
     const prods = DB.get('products');
@@ -405,11 +408,11 @@ function returnSale(saleId, typeKey){
   const typeLabels = {
     cash:'كاش', installment:'تقسيط', credit:'كريدي',
     installment_payment:'دفعة قسط', debt_payment:'دفعة دين',
-    owner_withdrawal:'سحب أرباح', worker_withdrawal:'سحب عامل'
+    owner_withdrawal:'سحب أرباح', owner_capital_withdrawal:'سحب رأس المال', worker_withdrawal:'سحب عامل'
   };
   typeLabels.warranty = 'ضمان';
   const typeLabel = typeLabels[typeKey] || typeKey;
-  const amount = (typeKey==='owner_withdrawal'||typeKey==='worker_withdrawal')
+  const amount = (typeKey==='owner_withdrawal'||typeKey==='owner_capital_withdrawal'||typeKey==='worker_withdrawal')
     ? Math.abs(sale.profit||0) : (sale.totalPaid||0);
 
   showConfirm(
@@ -466,8 +469,7 @@ function returnSale(saleId, typeKey){
         if(instIdx){
           const instRec = insts[instIdx.i];
           const instId = instRec.id;
-          insts.splice(instIdx.i,1);
-          DB.set('installments',insts);
+          DB.set('installments', removeById(insts, instId));
           fsDeleteDoc('installments',instId);
           // حذف كل الدفعات المرتبطة بهذا التقسيط من sales
           const cleanSales = DB.get('sales').filter(s=>
@@ -516,8 +518,7 @@ function returnSale(saleId, typeKey){
         if(dIdx){
           const debtRec = debts[dIdx.i];
           const debtId = debtRec.id;
-          debts.splice(dIdx.i,1);
-          DB.set('debts',debts);
+          DB.set('debts', removeById(debts, debtId));
           fsDeleteDoc('debts',debtId);
 
           const currentSales = DB.get('sales');
@@ -573,8 +574,9 @@ function returnSale(saleId, typeKey){
 
       // ===== حذف العملية من المبيعات =====
       const finalSales = DB.get('sales');
-      const fi = finalSales.findIndex(s=>s.id===saleId);
-      if(fi>=0){ finalSales.splice(fi,1); DB.set('sales',finalSales); }
+      if(finalSales.some(s=>s.id===saleId)){
+        DB.set('sales', removeById(finalSales, saleId));
+      }
 
       toast('✅ تم إرجاع العملية بنجاح');
       renderDashboard();

@@ -258,8 +258,7 @@ function confirmWorkerWithdraw(){
   w = recalculateWorkerBalances(w, w.salary || 0);
   saveWorkerData(w);
 
-  const sales = DB.get('sales');
-  sales.push({
+  DB.saveOne('sales', {
     id:genId(),
     productName:'سحب عامل — '+(note||w.name),
     workerId: w.id,
@@ -269,7 +268,6 @@ function confirmWorkerWithdraw(){
     profit: -amount,
     date: nowISO()
   });
-  DB.set('sales', sales);
 
   tg(`💸 <b>سحب عامل</b>\nالعامل: ${w.name}\nالمبلغ: ${fmt(amount)}\nالمتبقي: ${fmt(w.remaining)}${note?'\nملاحظة: '+note:''}\nالتاريخ: ${todayStr()}`);
 
@@ -299,8 +297,7 @@ function confirmOwnerWithdraw(){
     return;
   }
 
-  const sales = DB.get('sales');
-  sales.push({
+  DB.saveOne('sales', {
     id: genId(),
     productName: 'سحب صاحب المحل' + (note ? ' — '+note : ''),
     type: 'owner_withdrawal',
@@ -308,9 +305,44 @@ function confirmOwnerWithdraw(){
     profit: -amount,
     date: nowISO()
   });
-  DB.set('sales', sales);
 
   closeModal('owner-withdraw-ov');
   toast('✅ تم تسجيل السحب بنجاح');
+  renderDashboard();
+}
+
+function openOwnerCapitalWithdraw(){
+  const c = calcAll(null);
+  const availableCapital = Math.max(0, c.totalCapital);
+  document.getElementById('ocw-capital-display').textContent = fmt(availableCapital);
+  document.getElementById('ocw-capital-display').dataset.capital = availableCapital;
+  document.getElementById('ocw-amount').value = '';
+  document.getElementById('ocw-note').value   = '';
+  openModal('owner-capital-withdraw-ov');
+}
+
+function confirmOwnerCapitalWithdraw(){
+  const amount = parseFloat(document.getElementById('ocw-amount').value)||0;
+  const note   = document.getElementById('ocw-note').value.trim();
+  const availableCapital = parseFloat(document.getElementById('ocw-capital-display').dataset.capital||0);
+
+  if(!amount){ toast('أدخل المبلغ','err'); return; }
+  if(amount > availableCapital){
+    toast(`⚠️ المبلغ أكبر من رأس المال المتاح (${fmt(availableCapital)})!`,'err');
+    return;
+  }
+
+  DB.saveOne('sales', {
+    id: genId(),
+    productName: 'سحب رأس المال الكلي' + (note ? ' — '+note : ''),
+    type: 'owner_capital_withdrawal',
+    qty: 1,
+    totalPaid: 0,
+    profit: -amount,
+    date: nowISO()
+  });
+
+  closeModal('owner-capital-withdraw-ov');
+  toast('✅ تم تسجيل سحب رأس المال بنجاح');
   renderDashboard();
 }

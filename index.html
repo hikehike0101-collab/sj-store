@@ -183,6 +183,7 @@
         <div style="display:flex;gap:10px;align-items:center">
           <button class="btn btn-outline" style="font-size:12px;padding:7px 14px" onclick="openChangePwd()">🔑 تغيير كلمة السر</button>
           <button class="btn btn-primary" style="font-size:12px;padding:7px 14px" onclick="openOwnerWithdraw()">💰 سحب أرباح</button>
+          <button class="btn btn-outline" style="font-size:12px;padding:7px 14px" onclick="openOwnerCapitalWithdraw()">🏦 سحب رأس المال الكلي</button>
           <div class="filter-wrap">
           <button class="filter-btn" onclick="toggleFilter()" id="filter-btn-label">
             <span>📅</span><span id="filter-label">اليوم</span><span>▾</span>
@@ -1542,6 +1543,31 @@
       <input class="finput" id="ow-note" placeholder="سبب السحب...">
     </div>
     <button class="btn btn-primary" style="width:100%;padding:13px;font-size:14px" onclick="confirmOwnerWithdraw()">
+      ✅ تأكيد السحب
+    </button>
+  </div>
+</div>
+
+<!-- ===== نافذة سحب رأس المال الكلي ===== -->
+<div class="overlay" id="owner-capital-withdraw-ov">
+  <div class="modal" style="width:420px">
+    <div class="modal-hd">
+      <h3>🏦 سحب رأس المال الكلي</h3>
+      <button class="modal-close" onclick="closeModal('owner-capital-withdraw-ov')">✕</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--bg);border-radius:10px;margin-bottom:14px">
+      <span style="font-size:12px;color:var(--text-gray)">رأس المال المتاح</span>
+      <span style="font-weight:800;color:var(--primary);font-size:15px" id="ocw-capital-display">0 DA</span>
+    </div>
+    <div class="fg">
+      <label class="flabel">المبلغ المسحوب (DA) *</label>
+      <input class="finput" id="ocw-amount" type="number" min="1" placeholder="0">
+    </div>
+    <div class="fg">
+      <label class="flabel">ملاحظة (اختياري)</label>
+      <input class="finput" id="ocw-note" placeholder="سبب السحب...">
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:13px;font-size:14px" onclick="confirmOwnerCapitalWithdraw()">
       ✅ تأكيد السحب
     </button>
   </div>
