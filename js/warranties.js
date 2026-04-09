@@ -136,6 +136,8 @@ window.confirmWarrantySale = async function confirmWarrantySale() {
   const saleId = genId();
   const warrantyId = genId();
 
+  if (typeof deductStock === 'function' && !deductStock(_posProd.id, qty)) return;
+
   const sale = {
     id: saleId,
     productId: _posProd.id,
@@ -198,8 +200,6 @@ window.confirmWarrantySale = async function confirmWarrantySale() {
     date: saleDate,
     productSnapshot: buildWarrantyProductSnapshot(_posProd, unitPrice)
   });
-
-  if (typeof deductStock === 'function' && !deductStock(_posProd.id, qty)) return;
 
   tg(`🛡️ <b>بيع ضمان جديد</b>\nالزبون: ${form.customerName}\nالمنتج: ${_posProd.name}\nالكمية: ${qty}\nالمبلغ: ${fmt(totalPrice)}\nمدة الضمان: ${form.duration}\nالتاريخ: ${todayStr()}`);
 

@@ -229,7 +229,7 @@ function calcCredit(){
   document.getElementById('cred-remain-lbl').textContent = fmt(Math.max(0, total - paid));
 }
 
-function confirmSale(){
+async function confirmSale(){
   if(!_posProd) return;
   if(!ensureSaleStockAvailable()) return;
   const unitPrice = currentSaleUnitPrice();
@@ -238,6 +238,8 @@ function confirmSale(){
   const baseProfit = currentSaleBaseProfit();
 
   if(_saleType==='cash'){
+    if(!deductStock(_posProd.id, _saleQty)) return;
+
     // حفظ مبيعة كاش
     const sale = {
       id: genId(), productId: _posProd.id,
@@ -260,9 +262,6 @@ function confirmSale(){
       date: nowISO(),
       saleId: sale.id
     });
-
-    // نقص المخزون
-    if(!deductStock(_posProd.id, _saleQty)) return;
 
     // تيليجرام
     tg(`🛒 <b>بيع جديد</b>\nالمنتج: ${_posProd.name}\nالنوع: عادي كاش\nالكمية: ${_saleQty}\nالمبلغ: ${fmt(baseTotal)}\nالربح: ${fmt(baseProfit)}\nالتاريخ: ${todayStr()}`);
@@ -313,9 +312,9 @@ function confirmSale(){
       barcode13: genRandom13(),
       date: nowISO()
     };
-    DB.saveOne('installments', rec);
-
     if(!deductStock(_posProd.id, _saleQty)) return;
+
+    DB.saveOne('installments', rec);
 
     tg(`📅 <b>بيع بالتقسيط</b>\nالزبون: ${name}\nالمنتج: ${_posProd.name}\nالسعر الأصلي: ${fmt(installmentBase)}\nالربح الإضافي: ${fmt(extra)}\nالإجمالي: ${fmt(installmentTotal)}\nالمقدم: ${fmt(down)}\nالقسط: ${fmt(monthly)}/شهر × ${months}\nالتاريخ: ${todayStr()}`);
 
@@ -333,6 +332,8 @@ function confirmSale(){
       downPayment:down, months, monthlyPayment:monthly,
       date:nowISO(), saleId:instSaleId
     });
+
+    await window.autoPrintInstallmentContract?.(rec);
 
     closeModal('pos-sale-ov');
     toast('✅ تم تسجيل التقسيط بنجاح');
@@ -369,10 +370,9 @@ function confirmSale(){
       }],
       payments: paid>0?[{amount:paid,date:nowISO()}]:[]
     };
-    DB.saveOne('debts', rec);
-
-    // نقص المخزون
     if(!deductStock(_posProd.id, _saleQty)) return;
+
+    DB.saveOne('debts', rec);
 
     // تيليجرام
     tg(`💳 <b>بيع كريدي (دين)</b>\nالزبون: ${name}\nالمنتج: ${_posProd.name}\nالإجمالي: ${fmt(baseTotal)}\nدفع: ${fmt(paid)}\nمتبقي: ${fmt(baseTotal-paid)}\nالتاريخ: ${todayStr()}`);

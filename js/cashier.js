@@ -186,7 +186,7 @@ function calcCashierInstall(){
     <div style="display:flex;justify-content:space-between"><span>القسط الشهري:</span><b style="color:var(--primary)">${fmt(monthly)} DA × ${months}</b></div>`;
 }
 
-function confirmCashierSale(){
+async function confirmCashierSale(){
   if(!_cashierItems.length) return;
   const total  = getCashierTotal();
   const profit = getCashierProfit();
@@ -200,18 +200,32 @@ function confirmCashierSale(){
     cost: parseFloat(item.prod.cost) || 0
   }));
   const deductCashierStock = () => {
-    const prods = DB.get('products');
-    _cashierItems.forEach(item => {
+    const prods = DB.get('products').slice();
+    for(const item of _cashierItems){
       const pi = prods.findIndex(p=>p.id===item.prod.id);
-      if(pi>=0) prods[pi].qty=Math.max(0,(prods[pi].qty||0)-item.qty);
-    });
+      if(pi < 0){
+        toast(`⚠️ المنتج ${item.prod.name} لم يعد موجودًا`, 'warn');
+        return false;
+      }
+      const available = Math.max(0, parseInt(prods[pi].qty, 10) || 0);
+      if(available < item.qty){
+        toast(`⚠️ المخزون المتاح للمنتج ${item.prod.name} هو ${available} فقط`, 'warn');
+        return false;
+      }
+      prods[pi].qty = available - item.qty;
+    }
     DB.set('products',prods);
+    _cashierItems = _cashierItems.map(item => {
+      const updated = prods.find(p => p.id === item.prod.id);
+      return updated ? {...item, prod: updated} : item;
+    });
+    return true;
   };
 
   const productNames = _cashierItems.map(i=>`${i.prod.name}${i.qty>1?' ×'+i.qty:''}`).join('، ');
 
   if(type==='cash'){
-    deductCashierStock();
+    if(!deductCashierStock()) return;
     const saleId = genId();
     const saleData = {id:saleId, productName:productNames, type:'cash',
       qty:_cashierItems.reduce((s,i)=>s+i.qty,0),
@@ -237,7 +251,7 @@ function confirmCashierSale(){
     const months= parseInt(document.getElementById('ci-months').value)||1;
     if(!name){ toast('أدخل اسم الزبون','err'); return; }
     if(down > total){ toast('⚠️ المقدم أكبر من إجمالي البيع','err'); return; }
-    deductCashierStock();
+    if(!deductCashierStock()) return;
     const remain  = Math.max(0,total-down);
     const monthly = remain>0?Math.ceil(remain/months):0;
     const insts   = DB.get('installments');
@@ -266,6 +280,7 @@ function confirmCashierSale(){
       downPayment:down, months, monthlyPayment:monthly,
       date:nowISO(), saleId:instSaleId
     });
+    await window.autoPrintInstallmentContract?.(lastInst);
     tg(`📅 <b>كاشير — تقسيط</b>\nالزبون: ${name}\n${productNames}\nالإجمالي: ${fmt(total)}\nمقدم: ${fmt(down)}\nقسط: ${fmt(monthly)}×${months}\nالتاريخ: ${todayStr()}`);
     toast('✅ تم تسجيل التقسيط');
   }
@@ -276,7 +291,7 @@ function confirmCashierSale(){
     const paid  = parseFloat(document.getElementById('cc-paid').value)||0;
     if(!name){ toast('أدخل اسم الزبون','err'); return; }
     if(paid > total){ toast('⚠️ المبلغ المدفوع أكبر من إجمالي الدين','err'); return; }
-    deductCashierStock();
+    if(!deductCashierStock()) return;
     const remain = Math.max(0,total-paid);
     const initialProfit = total > 0 ? Math.round((profit / total) * paid) : 0;
     const debts  = DB.get('debts');
@@ -381,8 +396,19 @@ let _debtTarget = null;
 let _debtEditId = null;
 let _debtSelectedProducts = [];
 
+function getDebtTotalValue(){
+  return parseFloat(document.getElementById('dm-total').value) || 0;
+}
+
+function setDebtTotalValue(total){
+  const normalized = Math.max(0, Number(total) || 0);
+  document.getElementById('dm-total').value = normalized > 0 ? String(normalized) : '';
+  const display = document.getElementById('dm-total-display');
+  if(display) display.textContent = fmt(normalized);
+}
+
 function calcDebtRemain(){
-  const total = parseFloat(document.getElementById('dm-total').value)||0;
+  const total = getDebtTotalValue();
   const paidInput = document.getElementById('dm-paid');
   let paid  = parseFloat(paidInput.value)||0;
   if(paid > total){
@@ -398,14 +424,17 @@ function calcDebtProfit(){
   const netProfit = Math.max(0, salePrice - cost);
   const profitEl  = document.getElementById('dm-profit-display');
   if(profitEl) profitEl.textContent = fmt(netProfit);
-  document.getElementById('dm-total').value = salePrice > 0 ? String(salePrice) : '';
   calcDebtRemain();
 }
 
-function calcDebtTotal(){
-  const total = parseFloat(document.getElementById('dm-total').value)||0;
-  document.getElementById('dm-profit').value = total > 0 ? String(total) : '';
+function syncDebtSalePrice(){
+  const salePrice = parseFloat(document.getElementById('dm-profit').value)||0;
+  setDebtTotalValue(salePrice);
   calcDebtProfit();
+}
+
+function calcDebtTotal(){
+  calcDebtRemain();
 }
 
 function getDebtSelectionEntries() {
@@ -447,7 +476,7 @@ function applyDebtSelectionToForm() {
   document.getElementById('dm-reason').value = selected.map(({ product, qty }) => product.name + (qty > 1 ? ' ×' + qty : '')).join('، ');
   document.getElementById('dm-cost').value = selected.reduce((sum, item) => sum + ((parseFloat(item.product.cost) || 0) * item.qty), 0);
   document.getElementById('dm-profit').value = selected.reduce((sum, item) => sum + ((parseFloat(item.product.price) || 0) * item.qty), 0);
-  document.getElementById('dm-total').value = selected.reduce((sum, item) => sum + ((parseFloat(item.product.price) || 0) * item.qty), 0);
+  setDebtTotalValue(selected.reduce((sum, item) => sum + ((parseFloat(item.product.price) || 0) * item.qty), 0));
   calcDebtProfit();
   calcDebtRemain();
 }
@@ -597,9 +626,10 @@ function normalizeDebtPayments(payments = [], initialPaid = 0, recordDate = nowI
 function openDebtModal(editId=null){
   _debtEditId = editId;
   _debtSelectedProducts = [];
-  ['dm-name','dm-phone','dm-reason','dm-cost','dm-profit','dm-total','dm-paid'].forEach(id=>{
+  ['dm-name','dm-phone','dm-reason','dm-cost','dm-profit','dm-paid'].forEach(id=>{
     document.getElementById(id).value = id==='dm-paid' ? '0' : '';
   });
+  setDebtTotalValue(0);
   document.getElementById('dm-remain-display').textContent = '0';
   const dpEl = document.getElementById('dm-profit-display');
   if (dpEl) dpEl.textContent = '0';
@@ -615,7 +645,7 @@ function openDebtModal(editId=null){
     document.getElementById('dm-reason').value = d.reason || d.productName || '';
     document.getElementById('dm-cost').value   = d.cost || 0;
     document.getElementById('dm-profit').value = d.totalDebt || 0;
-    document.getElementById('dm-total').value  = d.totalDebt || 0;
+    setDebtTotalValue(d.totalDebt || 0);
     document.getElementById('dm-paid').value   = d.initialPaid ?? d.paid ?? 0;
     _debtSelectedProducts = (d.selectedProducts || []).map(item => ({ id: item.id, qty: Math.max(1, parseInt(item.qty) || 1) }));
     applyDebtSelectionToForm();
@@ -629,7 +659,7 @@ function openDebtModal(editId=null){
 function saveDebt(){
   const name   = document.getElementById('dm-name').value.trim();
   const reason = document.getElementById('dm-reason').value.trim();
-  const total  = parseFloat(document.getElementById('dm-total').value) || 0;
+  const total  = getDebtTotalValue();
   const paid   = parseFloat(document.getElementById('dm-paid').value) || 0;
   const cost   = parseFloat(document.getElementById('dm-cost').value) || 0;
   const salePrice = parseFloat(document.getElementById('dm-profit').value) || 0;

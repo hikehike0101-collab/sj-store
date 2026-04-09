@@ -1727,10 +1727,14 @@
     </div>
     <div class="frow">
       <div class="fg"><label class="flabel">سعر التكلفة / الشراء (DA)</label><input class="finput" id="dm-cost" type="number" min="0" placeholder="0" oninput="calcDebtProfit()"></div>
-      <div class="fg"><label class="flabel">سعر البيع للزبون (DA) *</label><input class="finput" id="dm-profit" type="number" min="0" placeholder="0" oninput="calcDebtTotal()"></div>
+      <div class="fg"><label class="flabel">سعر البيع للزبون (DA) *</label><input class="finput" id="dm-profit" type="number" min="0" placeholder="0" oninput="syncDebtSalePrice()"></div>
     </div>
     <div class="frow">
-      <div class="fg"><label class="flabel">إجمالي الدين (DA) *</label><input class="finput" id="dm-total" type="number" min="0" placeholder="0" oninput="calcDebtTotal()"></div>
+      <div class="fg">
+        <label class="flabel">إجمالي الدين (DA)</label>
+        <div class="fcomputed" id="dm-total-display">0</div>
+        <input id="dm-total" type="hidden" value="">
+      </div>
       <div class="fg"><label class="flabel">دفع الآن (DA)</label><input class="finput" id="dm-paid" type="number" min="0" placeholder="0" value="0" oninput="calcDebtRemain()"></div>
     </div>
     <div class="fg">

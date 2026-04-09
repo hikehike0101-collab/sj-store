@@ -167,10 +167,11 @@ function confirmPayAll(){
   i.lastUpdate = nowISO();
   data[idx] = i;
   DB.set('installments', data);
+  fsSaveDoc('installments', i.id, i);
 
   const sales = DB.get('sales');
   sales.push({id:genId(),productName:i.productName,productId:i.productId||'',
-    type:'installment',qty:1,totalPaid:finalAmount,profit:i.profit||0,date:nowISO()});
+    type:'installment_payment',qty:1,totalPaid:finalAmount,profit:0,date:nowISO()});
   DB.set('sales',sales);
 
   tg(`🎉 <b>تسوية كاملة</b>\nالزبون: ${i.customerName}\nالمنتج: ${i.productName}\nالمبلغ الكلي: ${fmt(i.totalPrice)}\nالتاريخ: ${todayStr()}`);
@@ -192,6 +193,55 @@ function openInstEdit(id){
   document.getElementById('iedit-paid').value  = i.paid||0;
   document.getElementById('iedit-profit').value= i.extraProfit||0;
   openModal('inst-edit-ov');
+}
+
+function syncInstallmentLinkedRecords(record){
+  if(!record?.id) return;
+
+  const linkedQty = record.selectedProducts?.reduce((sum, item) => sum + (parseInt(item.qty, 10) || 0), 0) || 1;
+  const sales = DB.get('sales').slice();
+  const saleIdx = sales.findIndex((item) => item.installmentId === record.id && item.type === 'installment');
+  let linkedSaleId = '';
+
+  if(saleIdx >= 0){
+    linkedSaleId = sales[saleIdx].id || '';
+    sales[saleIdx] = {
+      ...sales[saleIdx],
+      productId: record.productId || sales[saleIdx].productId || '',
+      productName: record.productName || sales[saleIdx].productName || '',
+      customerName: record.customerName || sales[saleIdx].customerName || '',
+      qty: linkedQty,
+      totalPaid: Number(record.downPayment ?? sales[saleIdx].totalPaid ?? 0),
+      profit: Number(record.profit ?? sales[saleIdx].profit ?? 0),
+      selectedProducts: record.selectedProducts || sales[saleIdx].selectedProducts || []
+    };
+    DB.set('sales', sales);
+  }
+
+  const tx = DB.get('transactions').slice();
+  const txIdx = tx.findIndex((item) =>
+    (linkedSaleId && item.saleId === linkedSaleId) ||
+    (item.installmentId && item.installmentId === record.id)
+  );
+
+  if(txIdx >= 0){
+    tx[txIdx] = {
+      ...tx[txIdx],
+      productName: record.productName || tx[txIdx].productName || '',
+      productId: record.productId || tx[txIdx].productId || '',
+      customerName: record.customerName || tx[txIdx].customerName || '',
+      phone: record.phone || tx[txIdx].phone || '',
+      qty: linkedQty,
+      salePrice: Number(record.totalPrice || 0),
+      profit: Number(record.profit ?? tx[txIdx].profit ?? 0),
+      downPayment: Number(record.downPayment ?? tx[txIdx].downPayment ?? 0),
+      remaining: Number(record.remaining ?? tx[txIdx].remaining ?? 0),
+      months: Number(record.months ?? tx[txIdx].months ?? 0),
+      monthlyPayment: Number(record.monthlyPayment ?? tx[txIdx].monthlyPayment ?? 0),
+      installmentId: record.id
+    };
+    DB.set('transactions', tx);
+  }
 }
 
 function saveInstEdit(){
@@ -218,6 +268,8 @@ function saveInstEdit(){
     monthlyPayment: monthly, extraProfit: profit
   };
   DB.set('installments', data);
+  fsSaveDoc('installments', data[idx].id, data[idx]);
+  syncInstallmentLinkedRecords(data[idx]);
   closeModal('inst-edit-ov');
   toast('✅ تم حفظ التعديلات');
   renderInstallments();
@@ -315,7 +367,7 @@ function escapeInstallmentContractHtml(value){
 }
 
 function printInstallmentContract(i){
-  if(!i) return;
+  if(!i) return Promise.resolve(false);
   const buildSheet = (leftMm) => `
     <div class="sheet" style="left:${leftMm}mm">
       <div class="bg-wrap">
@@ -381,35 +433,54 @@ body{ font-family:Arial,sans-serif; }
 </body>
 </html>`;
 
-  let iframe = document.getElementById('print-installment-contract-iframe');
-  if(iframe) iframe.remove();
-  iframe = document.createElement('iframe');
-  iframe.id = 'print-installment-contract-iframe';
-  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:29.7cm;height:21cm;border:none;visibility:hidden';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentDocument || iframe.contentWindow.document;
-  doc.open();
-  doc.write(html);
-  doc.close();
-
-  setTimeout(() => {
+  return new Promise((resolve) => {
     try{
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-    }catch(e){
-      const w = window.open('', '_blank');
-      if(w){
-        w.document.write(html);
-        w.document.close();
-        w.onload = () => {
-          w.print();
-          setTimeout(() => w.close(), 1000);
-        };
-      }
+      let iframe = document.getElementById('print-installment-contract-iframe');
+      if(iframe) iframe.remove();
+      iframe = document.createElement('iframe');
+      iframe.id = 'print-installment-contract-iframe';
+      iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:29.7cm;height:21cm;border:none;visibility:hidden';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      setTimeout(() => {
+        try{
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        }catch(e){
+          const w = window.open('', '_blank');
+          if(w){
+            w.document.write(html);
+            w.document.close();
+            w.onload = () => {
+              w.print();
+              setTimeout(() => w.close(), 1000);
+            };
+          }else{
+            throw e;
+          }
+        }
+        setTimeout(() => { if(iframe) iframe.remove(); }, 4000);
+        resolve(true);
+      }, 600);
+    }catch(error){
+      console.error('Installment contract print failed:', error);
+      resolve(false);
     }
-    setTimeout(() => { if(iframe) iframe.remove(); }, 4000);
-  }, 600);
+  });
+}
+
+window.autoPrintInstallmentContract = async function autoPrintInstallmentContract(record){
+  if(!record) return false;
+  const printed = await printInstallmentContract(record);
+  if(!printed){
+    toast('⚠️ تم حفظ التقسيط لكن تعذر فتح وثيقة الطباعة', 'warn');
+  }
+  return printed;
 }
 
 function printInstLegacyLabelUnused(){
