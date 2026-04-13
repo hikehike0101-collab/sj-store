@@ -1,6 +1,27 @@
 (function initSecurityHardening() {
   const DASHBOARD_PIN_HASH_KEY = 'dashboard_pin_hash';
   const DASHBOARD_PIN_UPDATED_AT_KEY = 'dashboard_pin_updated_at';
+  const KPI_VISIBILITY_KEY = 'kpi_visibility_state';
+  const KPI_VISIBILITY_UPDATED_AT_KEY = 'kpi_visibility_state_updated_at';
+  const KPI_VISIBILITY_DEFAULTS = Object.freeze({
+    inst_total: true,
+    inst_collected: false,
+    inst_expected: true,
+    inst_remaining: true,
+    warranty_count: true,
+    warranty_total: true,
+    warranty_profit: false
+  });
+  const KPI_VISIBILITY_FIELDS = Object.freeze({
+    inst_total: { hiddenId: 'inst-kpi-total-hidden', realId: 'inst-kpi-total-real', realDisplay: 'inline' },
+    inst_collected: { hiddenId: 'inst-kpi-collected-hidden', realId: 'inst-kpi-collected-real', realDisplay: 'inline' },
+    inst_expected: { hiddenId: 'inst-kpi-expected-hidden', realId: 'inst-kpi-expected-real', realDisplay: 'inline' },
+    inst_remaining: { hiddenId: 'inst-kpi-remaining-hidden', realId: 'inst-kpi-remaining-real', realDisplay: 'inline' },
+    warranty_count: { hiddenId: 'warranty-kpi-count-hidden', realId: 'warranty-kpi-count-real', realDisplay: 'inline' },
+    warranty_total: { hiddenId: 'warranty-kpi-total-hidden', realId: 'warranty-kpi-total-real', realDisplay: 'inline' },
+    warranty_profit: { hiddenId: 'warranty-kpi-profit-hidden', realId: 'warranty-kpi-profit-real', realDisplay: 'inline' }
+  });
+  let dashboardPinSuccessAction = null;
 
   function dashboardPinKey(uid = currentUserUid()) {
     return userScopedStorageKey(DASHBOARD_PIN_HASH_KEY, uid);
@@ -10,12 +31,46 @@
     return userScopedStorageKey(DASHBOARD_PIN_UPDATED_AT_KEY, uid);
   }
 
+  function kpiVisibilityKey(uid = currentUserUid()) {
+    return userScopedStorageKey(KPI_VISIBILITY_KEY, uid);
+  }
+
+  function kpiVisibilityUpdatedAtKey(uid = currentUserUid()) {
+    return userScopedStorageKey(KPI_VISIBILITY_UPDATED_AT_KEY, uid);
+  }
+
   function storedDashboardPinHash(uid = currentUserUid()) {
     return uid ? (localStorage.getItem(dashboardPinKey(uid)) || '') : '';
   }
 
   function storedDashboardPinUpdatedAt(uid = currentUserUid()) {
     return uid ? (localStorage.getItem(dashboardPinUpdatedAtKey(uid)) || '') : '';
+  }
+
+  function normalizeKpiVisibilityState(state) {
+    const next = { ...KPI_VISIBILITY_DEFAULTS };
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return next;
+    Object.keys(next).forEach((key) => {
+      if (typeof state[key] === 'boolean') next[key] = state[key];
+    });
+    return next;
+  }
+
+  function hasStoredKpiVisibilityState(uid = currentUserUid()) {
+    return !!(uid && localStorage.getItem(kpiVisibilityKey(uid)) !== null);
+  }
+
+  function storedKpiVisibilityState(uid = currentUserUid()) {
+    if (!uid) return normalizeKpiVisibilityState();
+    try {
+      return normalizeKpiVisibilityState(JSON.parse(localStorage.getItem(kpiVisibilityKey(uid)) || 'null'));
+    } catch {
+      return normalizeKpiVisibilityState();
+    }
+  }
+
+  function storedKpiVisibilityUpdatedAt(uid = currentUserUid()) {
+    return uid ? (localStorage.getItem(kpiVisibilityUpdatedAtKey(uid)) || '') : '';
   }
 
   function storeDashboardPinState(hash, updatedAt = new Date().toISOString(), uid = currentUserUid()) {
@@ -27,6 +82,12 @@
     }
     localStorage.removeItem(dashboardPinKey(uid));
     localStorage.removeItem(dashboardPinUpdatedAtKey(uid));
+  }
+
+  function storeKpiVisibilityState(state, updatedAt = new Date().toISOString(), uid = currentUserUid()) {
+    if (!uid) return;
+    localStorage.setItem(kpiVisibilityKey(uid), JSON.stringify(normalizeKpiVisibilityState(state)));
+    localStorage.setItem(kpiVisibilityUpdatedAtKey(uid), updatedAt);
   }
 
   function dashboardPinEnabled() {
@@ -89,6 +150,40 @@
     }
   }
 
+  async function readCloudKpiVisibilityState(uid = currentUserUid()) {
+    try {
+      const ref = await dashboardPinCloudRef(uid);
+      if (!ref) return null;
+      const { getDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      const data = snap.data() || {};
+      return {
+        state: normalizeKpiVisibilityState(data.kpiVisibilityState),
+        updatedAt: String(data.kpiVisibilityUpdatedAt || '')
+      };
+    } catch (e) {
+      console.warn('readCloudKpiVisibilityState:', e.message);
+      return null;
+    }
+  }
+
+  async function writeCloudKpiVisibilityState(state, updatedAt = new Date().toISOString(), uid = currentUserUid()) {
+    try {
+      const ref = await dashboardPinCloudRef(uid);
+      if (!ref) return false;
+      const { setDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+      await setDoc(ref, {
+        kpiVisibilityState: normalizeKpiVisibilityState(state),
+        kpiVisibilityUpdatedAt: updatedAt
+      }, { merge: true });
+      return true;
+    } catch (e) {
+      console.warn('writeCloudKpiVisibilityState:', e.message);
+      return false;
+    }
+  }
+
   async function hashDashboardPin(pin, uid = currentUserUid()) {
     if (!uid || !window.crypto?.subtle) return '';
     const bytes = new TextEncoder().encode(`sj-dashboard:${uid}:${String(pin || '').trim()}`);
@@ -127,6 +222,39 @@
     }
   }
 
+  async function syncKpiVisibilityState() {
+    const uid = currentUserUid();
+    if (!uid) return;
+
+    const localExists = hasStoredKpiVisibilityState(uid);
+    const localState = storedKpiVisibilityState(uid);
+    const localUpdatedAt = storedKpiVisibilityUpdatedAt(uid);
+    const cloudState = await readCloudKpiVisibilityState(uid);
+    const cloudExists = !!cloudState?.updatedAt;
+    const cloudVisibility = normalizeKpiVisibilityState(cloudState?.state);
+    const cloudUpdatedAt = cloudState?.updatedAt || '';
+    const localTs = Date.parse(localUpdatedAt || '') || 0;
+    const cloudTs = Date.parse(cloudUpdatedAt || '') || 0;
+
+    if (!localExists && cloudExists) {
+      storeKpiVisibilityState(cloudVisibility, cloudUpdatedAt || new Date().toISOString(), uid);
+      return;
+    }
+
+    if (localExists && !cloudExists) {
+      await writeCloudKpiVisibilityState(localState, localUpdatedAt || new Date().toISOString(), uid);
+      return;
+    }
+
+    if (localExists && cloudExists && JSON.stringify(localState) !== JSON.stringify(cloudVisibility)) {
+      if (cloudTs > localTs) {
+        storeKpiVisibilityState(cloudVisibility, cloudUpdatedAt || new Date().toISOString(), uid);
+      } else {
+        await writeCloudKpiVisibilityState(localState, localUpdatedAt || new Date().toISOString(), uid);
+      }
+    }
+  }
+
   async function verifyDashboardPin(pin) {
     const raw = String(pin || '').trim();
     if (!raw) return false;
@@ -149,12 +277,84 @@
     return false;
   }
 
+  function setDashboardPinDialog(title, message, confirmLabel = 'دخول') {
+    const titleEl = document.getElementById('pwd-title');
+    const messageEl = document.getElementById('pwd-message');
+    const confirmEl = document.getElementById('pwd-confirm-btn');
+    if (titleEl) titleEl.textContent = title || 'لوحة التحكم';
+    if (messageEl) messageEl.innerHTML = message || 'هذه الصفحة خاصة بصاحب المحل فقط<br>أدخل كلمة المرور للمتابعة';
+    if (confirmEl) confirmEl.textContent = confirmLabel;
+  }
+
+  function openDashboardPinPrompt(onSuccess, options = {}) {
+    if (!dashboardPinEnabled()) {
+      onSuccess?.();
+      return;
+    }
+
+    dashboardPinSuccessAction = typeof onSuccess === 'function' ? onSuccess : null;
+    setDashboardPinDialog(
+      options.title || 'لوحة التحكم',
+      options.message || 'هذه الصفحة خاصة بصاحب المحل فقط<br>أدخل كلمة المرور للمتابعة',
+      options.confirmLabel || 'دخول'
+    );
+
+    const input = document.getElementById('pwd-input');
+    const error = document.getElementById('pwd-error');
+    if (input) input.value = '';
+    if (error) error.style.display = 'none';
+    document.getElementById('dash-pwd-ov')?.classList.add('open');
+    setTimeout(() => input?.focus(), 280);
+  }
+
+  function setSensitiveKpiVisibility(key, visible) {
+    const state = storedKpiVisibilityState();
+    state[key] = !!visible;
+    const updatedAt = new Date().toISOString();
+    storeKpiVisibilityState(state, updatedAt);
+    window.applySensitiveKpiVisibilityState?.();
+    writeCloudKpiVisibilityState(state, updatedAt).catch(() => {});
+  }
+
+  function toggleSensitiveKpi(key, options = {}) {
+    const state = storedKpiVisibilityState();
+    const visible = !!state[key];
+    if (visible) {
+      setSensitiveKpiVisibility(key, false);
+      return;
+    }
+
+    const reveal = () => setSensitiveKpiVisibility(key, true);
+    if (options.requiresPin && dashboardPinEnabled()) {
+      openDashboardPinPrompt(reveal, {
+        title: options.title || 'كشف البيانات',
+        message: options.message || 'أدخل كلمة سر لوحة التحكم للمتابعة',
+        confirmLabel: options.confirmLabel || 'إظهار'
+      });
+      return;
+    }
+    reveal();
+  }
+
   function closeDashboardPinModal() {
     document.getElementById('dash-pwd-ov')?.classList.remove('open');
   }
 
   window.closePwd = function closePwd() {
+    dashboardPinSuccessAction = null;
+    setDashboardPinDialog('لوحة التحكم', 'هذه الصفحة خاصة بصاحب المحل فقط<br>أدخل كلمة المرور للمتابعة', 'دخول');
     closeDashboardPinModal();
+  };
+
+  window.applySensitiveKpiVisibilityState = function applySensitiveKpiVisibilityState() {
+    const state = storedKpiVisibilityState();
+    Object.entries(KPI_VISIBILITY_FIELDS).forEach(([key, config]) => {
+      const hidden = document.getElementById(config.hiddenId);
+      const real = document.getElementById(config.realId);
+      const visible = !!state[key];
+      if (hidden) hidden.style.display = visible ? 'none' : 'inline';
+      if (real) real.style.display = visible ? (config.realDisplay || 'inline') : 'none';
+    });
   };
 
   function runDeleteConfirmFlow() {
@@ -246,12 +446,22 @@
 
   window.syncUserScopedSecurityState = async function syncUserScopedSecurityState() {
     await syncDashboardPinState();
+    await syncKpiVisibilityState();
     window.refreshDashboardPasswordUI();
+    window.applySensitiveKpiVisibilityState?.();
     window.renderSettings?.();
   };
 
   window.getPWD = function getPWD() {
     return '';
+  };
+
+  window.toggleDashboardPasswordField = function toggleDashboardPasswordField(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    if (btn) btn.textContent = showing ? '👁️' : '🙈';
   };
 
   window.openDashboard = function openDashboard(el) {
@@ -261,13 +471,10 @@
       renderDashboard();
       return;
     }
-
-    const input = document.getElementById('pwd-input');
-    const error = document.getElementById('pwd-error');
-    if (input) input.value = '';
-    if (error) error.style.display = 'none';
-    document.getElementById('dash-pwd-ov')?.classList.add('open');
-    setTimeout(() => input?.focus(), 280);
+    openDashboardPinPrompt(() => {
+      goPage('dashboard', window._dashboardAccessBtn);
+      renderDashboard();
+    });
   };
 
   window.confirmPwd = async function confirmPwd() {
@@ -276,8 +483,10 @@
 
     if (await verifyDashboardPin(input?.value || '')) {
       closeDashboardPinModal();
-      goPage('dashboard', window._dashboardAccessBtn);
-      renderDashboard();
+      const action = dashboardPinSuccessAction;
+      dashboardPinSuccessAction = null;
+      setDashboardPinDialog('لوحة التحكم', 'هذه الصفحة خاصة بصاحب المحل فقط<br>أدخل كلمة المرور للمتابعة', 'دخول');
+      if (typeof action === 'function') action();
       return;
     }
 
@@ -359,23 +568,45 @@
     toast('✅ تم حذف كلمة السر وأصبحت لوحة التحكم مفتوحة');
   };
 
+  window.toggleInstallmentKpi = function toggleInstallmentKpi(key) {
+    const map = {
+      total: 'inst_total',
+      collected: 'inst_collected',
+      expected: 'inst_expected',
+      remaining: 'inst_remaining'
+    };
+    const stateKey = map[key];
+    if (!stateKey) return;
+    toggleSensitiveKpi(stateKey, key === 'collected' ? {
+      requiresPin: true,
+      title: 'إظهار الأرباح المحصلة',
+      message: 'أدخل كلمة سر لوحة التحكم لإظهار أرباح التقسيط المحصلة',
+      confirmLabel: 'إظهار'
+    } : {});
+  };
+
+  window.toggleWarrantyKpi = function toggleWarrantyKpi(key) {
+    const map = {
+      count: 'warranty_count',
+      total: 'warranty_total',
+      profit: 'warranty_profit'
+    };
+    const stateKey = map[key];
+    if (!stateKey) return;
+    toggleSensitiveKpi(stateKey, key === 'profit' ? {
+      requiresPin: true,
+      title: 'إظهار أرباح الضمان',
+      message: 'أدخل كلمة سر لوحة التحكم لإظهار أرباح مبيعات الضمان',
+      confirmLabel: 'إظهار'
+    } : {});
+  };
+
   window.toggleInstProfit = function toggleInstProfit() {
-    const hidden = document.getElementById('inst-kpi-collected-hidden');
-    const real = document.getElementById('inst-kpi-collected-real');
-    if (!hidden || !real) return;
-
-    if (real.style.display === 'none') {
-      hidden.style.display = 'none';
-      real.style.display = 'inline';
-      return;
-    }
-
-    hidden.style.display = 'inline';
-    real.style.display = 'none';
+    window.toggleInstallmentKpi('collected');
   };
 
   window.confirmInstProfit = function confirmInstProfit() {
-    window.toggleInstProfit();
+    window.toggleInstallmentKpi('collected');
   };
 
   window.openDeletePwd = function openDeletePwd(pwdTitle, pwdMsg, confirmTitle, confirmMsg, action) {

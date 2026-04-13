@@ -27,6 +27,7 @@ function renderInstallments(){
   document.getElementById('inst-kpi-collected').textContent = num(kpiProfit);
   document.getElementById('inst-kpi-expected').textContent  = num(kpiExpected);
   document.getElementById('inst-kpi-remaining').textContent = num(kpiRemaining);
+  window.applySensitiveKpiVisibilityState?.();
   document.getElementById('inst-count').textContent = data.length+' زبون';
 
   const tbody = document.getElementById('inst-tbody');

@@ -234,6 +234,7 @@ window.renderWarranties = function renderWarranties() {
   if (kpiCount) kpiCount.textContent = String(records.length);
   if (kpiTotal) kpiTotal.textContent = num(records.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0));
   if (kpiProfit) kpiProfit.textContent = num(records.reduce((sum, item) => sum + Number(item.profit || 0), 0));
+  window.applySensitiveKpiVisibilityState?.();
 
   if (!records.length) {
     tbody.innerHTML = '';
@@ -260,7 +261,6 @@ window.renderWarranties = function renderWarranties() {
       </td>
       <td>
         <div style="font-weight:900;color:var(--primary)">${fmt(item.totalPrice || 0)}</div>
-        <div style="font-size:12px;color:#276749;margin-top:4px">ربح: ${fmt(item.profit || 0)}</div>
       </td>
       <td>${warrantyDateLabel(item.date)}</td>
       <td style="text-align:center">

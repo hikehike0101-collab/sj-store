@@ -65,8 +65,32 @@ function addDays(date, amount){
 
 function addMonths(date, amount){
   const d = new Date(date);
+  const targetDay = d.getDate();
+  d.setDate(1);
   d.setMonth(d.getMonth() + amount);
+  const lastDayOfTargetMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(targetDay, lastDayOfTargetMonth));
   return d;
+}
+
+function startOfMonth(date){
+  const d = new Date(date);
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function dayRangeFromOffset(todayStart, offset){
+  const from = addDays(todayStart, offset);
+  return { from, to: addDays(from, 1) };
+}
+
+function monthRangeFromCount(todayStart, count){
+  const currentMonthStart = startOfMonth(todayStart);
+  return {
+    from: addMonths(currentMonthStart, -(Math.max(1, count) - 1)),
+    to: addDays(todayStart, 1)
+  };
 }
 
 function toggleFilter(){
@@ -91,26 +115,26 @@ function setFilter(val, label, el){
 function getFilterRange(){
   const todayStart = startOfDay(new Date());
   const tomorrowStart = addDays(todayStart, 1);
-  const weekStart = addDays(todayStart, -todayStart.getDay());
+  const last7DaysStart = addDays(todayStart, -6);
   const map = {
-    today: () => ({ from: todayStart, to: tomorrowStart }),
-    yesterday: () => ({ from: addDays(todayStart, -1), to: todayStart }),
-    '2days': () => ({ from: addDays(todayStart, -2), to: tomorrowStart }),
-    '3days': () => ({ from: addDays(todayStart, -3), to: tomorrowStart }),
-    week: () => ({ from: weekStart, to: tomorrowStart }),
+    today: () => dayRangeFromOffset(todayStart, 0),
+    yesterday: () => dayRangeFromOffset(todayStart, -1),
+    '2days': () => dayRangeFromOffset(todayStart, -2),
+    '3days': () => dayRangeFromOffset(todayStart, -3),
+    week: () => ({ from: last7DaysStart, to: tomorrowStart }),
     '2weeks': () => ({ from: addDays(todayStart, -13), to: tomorrowStart }),
-    '1m': () => ({ from: addMonths(todayStart, -1), to: tomorrowStart }),
-    '2m': () => ({ from: addMonths(todayStart, -2), to: tomorrowStart }),
-    '3m': () => ({ from: addMonths(todayStart, -3), to: tomorrowStart }),
-    '4m': () => ({ from: addMonths(todayStart, -4), to: tomorrowStart }),
-    '5m': () => ({ from: addMonths(todayStart, -5), to: tomorrowStart }),
-    '6m': () => ({ from: addMonths(todayStart, -6), to: tomorrowStart }),
-    '7m': () => ({ from: addMonths(todayStart, -7), to: tomorrowStart }),
-    '8m': () => ({ from: addMonths(todayStart, -8), to: tomorrowStart }),
-    '9m': () => ({ from: addMonths(todayStart, -9), to: tomorrowStart }),
-    '10m': () => ({ from: addMonths(todayStart, -10), to: tomorrowStart }),
-    '11m': () => ({ from: addMonths(todayStart, -11), to: tomorrowStart }),
-    '12m': () => ({ from: addMonths(todayStart, -12), to: tomorrowStart }),
+    '1m': () => monthRangeFromCount(todayStart, 1),
+    '2m': () => monthRangeFromCount(todayStart, 2),
+    '3m': () => monthRangeFromCount(todayStart, 3),
+    '4m': () => monthRangeFromCount(todayStart, 4),
+    '5m': () => monthRangeFromCount(todayStart, 5),
+    '6m': () => monthRangeFromCount(todayStart, 6),
+    '7m': () => monthRangeFromCount(todayStart, 7),
+    '8m': () => monthRangeFromCount(todayStart, 8),
+    '9m': () => monthRangeFromCount(todayStart, 9),
+    '10m': () => monthRangeFromCount(todayStart, 10),
+    '11m': () => monthRangeFromCount(todayStart, 11),
+    '12m': () => monthRangeFromCount(todayStart, 12),
   };
   return map[currentFilter] ? map[currentFilter]() : { from: new Date(0), to: null };
 }
@@ -330,7 +354,7 @@ function renderDashboard(){
 
   drawDonut(c.totalCollected, Math.max(0,c.totalProfit), c.instRemain, c.debtRemain, c.totalCapital);
 
-  // جدول آخر العمليات - مباشرة من البيانات الحقيقية
+  // جدول العمليات ضمن الفلتر الزمني - مباشرة من البيانات الحقيقية
   const sales   = DB.get('sales');
   const repairs = DB.get('repairs');
   // المبيعات فقط — بدون التصليح (التصليح منفصل عن صاحب المحل)
@@ -349,11 +373,11 @@ function renderDashboard(){
     if (r.typeKey === 'warranty') r.type = 'ضمان';
   });
 
-  // آخر العمليات — بدون التصليح (التصليح لا علاقة له بصاحب المحل)
+  // العمليات ضمن الفلتر — بدون التصليح (التصليح لا علاقة له بصاحب المحل)
   const recentRepairs = [];
 
   const allRecent = [...recentSales, ...recentRepairs]
-    .sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10);
+    .sort((a,b)=>new Date(b.date)-new Date(a.date));
 
   const tbody = document.getElementById('dash-recent');
   if(!allRecent.length){

@@ -178,9 +178,9 @@
     <div id="page-dashboard" class="page">
 
       <!-- فلتر الوقت -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:10px;flex-wrap:wrap">
         <div style="font-size:13px;color:var(--text-gray)">مرحباً يا صاحب المحل 👋 — إليك ملخص النشاط</div>
-        <div style="display:flex;gap:10px;align-items:center">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-outline" style="font-size:12px;padding:7px 14px" onclick="openChangePwd()">🔑 تغيير كلمة السر</button>
           <button class="btn btn-primary" style="font-size:12px;padding:7px 14px" onclick="openOwnerWithdraw()">💰 سحب أرباح</button>
           <button class="btn btn-outline" style="font-size:12px;padding:7px 14px" onclick="openOwnerCapitalWithdraw()">🏦 سحب رأس المال الكلي</button>
@@ -190,13 +190,10 @@
           </button>
           <div class="filter-dd" id="filter-dd">
             <div class="fopt sel" onclick="setFilter('today','اليوم',this)">اليوم</div>
-            <div class="fopt" onclick="setFilter('yesterday','قبل يوم',this)">قبل يوم</div>
-            <div class="fopt" onclick="setFilter('2days','قبل يومين',this)">قبل يومين</div>
-            <div class="fopt" onclick="setFilter('3days','قبل 3 أيام',this)">قبل 3 أيام</div>
-            <div class="fopt" onclick="setFilter('week','هذا الأسبوع',this)">هذا الأسبوع</div>
+            <div class="fopt" onclick="setFilter('week','أسبوع',this)">أسبوع</div>
             <div class="fopt" onclick="setFilter('2weeks','أسبوعان',this)">أسبوعان</div>
-            <div class="fopt" onclick="setFilter('1m','شهر',this)">شهر</div>
-            <div class="fopt" onclick="setFilter('2m','شهران',this)">شهران</div>
+            <div class="fopt" onclick="setFilter('1m','1 شهر',this)">1 شهر</div>
+            <div class="fopt" onclick="setFilter('2m','2 أشهر',this)">2 أشهر</div>
             <div class="fopt" onclick="setFilter('3m','3 أشهر',this)">3 أشهر</div>
             <div class="fopt" onclick="setFilter('4m','4 أشهر',this)">4 أشهر</div>
             <div class="fopt" onclick="setFilter('5m','5 أشهر',this)">5 أشهر</div>
@@ -206,9 +203,9 @@
             <div class="fopt" onclick="setFilter('9m','9 أشهر',this)">9 أشهر</div>
             <div class="fopt" onclick="setFilter('10m','10 أشهر',this)">10 أشهر</div>
             <div class="fopt" onclick="setFilter('11m','11 شهر',this)">11 شهر</div>
-            <div class="fopt" onclick="setFilter('12m','سنة كاملة',this)">سنة كاملة</div>
+            <div class="fopt" onclick="setFilter('12m','12 شهر',this)">12 شهر</div>
           </div>
-          </div>
+        </div>
         </div>
       </div>
 
@@ -279,21 +276,23 @@
         <!-- Recent Sales -->
         <div class="tbl-wrap">
           <div class="tbl-head">
-            <h3>أحدث عمليات البيع</h3>
+            <h3>عمليات البيع حسب الفلتر</h3>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>المنتج</th>
-                <th>نوع البيع</th>
-                <th>الكمية</th>
-                <th>المبلغ المدفوع</th>
-                <th>الوقت</th>
-                <th style="text-align:center">إرجاع</th>
-              </tr>
-            </thead>
-            <tbody id="dash-recent"></tbody>
-          </table>
+          <div id="dash-recent-scroll" style="height:420px;overflow-y:auto;overflow-x:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>المنتج</th>
+                  <th>نوع البيع</th>
+                  <th>الكمية</th>
+                  <th>المبلغ المدفوع</th>
+                  <th>الوقت</th>
+                  <th style="text-align:center">إرجاع</th>
+                </tr>
+              </thead>
+              <tbody id="dash-recent"></tbody>
+            </table>
+          </div>
         </div>
 
       </div>
@@ -401,12 +400,15 @@
 
       <!-- KPI -->
       <div class="kpi-grid" style="margin-bottom:20px">
-        <div class="kpi-card c-blue">
+        <div class="kpi-card c-blue" onclick="toggleInstallmentKpi('total')" style="cursor:pointer">
           <div class="kpi-icon" style="background:#EBF8FF">📅</div>
           <div class="kpi-label">إجمالي مبيعات التقسيط</div>
-          <div class="kpi-val"><small>DA</small><span id="inst-kpi-total">0</span></div>
+          <div class="kpi-val">
+            <span id="inst-kpi-total-hidden" style="display:none;letter-spacing:3px;font-size:16px">••••</span>
+            <span id="inst-kpi-total-real"><small>DA</small><span id="inst-kpi-total">0</span></span>
+          </div>
         </div>
-        <div class="kpi-card c-green" onclick="toggleInstProfit()" style="cursor:pointer">
+        <div class="kpi-card c-green" onclick="toggleInstallmentKpi('collected')" style="cursor:pointer">
           <div class="kpi-icon" style="background:#F0FFF4">✅</div>
           <div class="kpi-label">الأرباح المحصلة</div>
           <div class="kpi-val">
@@ -414,15 +416,21 @@
             <span id="inst-kpi-collected-real" style="display:none"><small>DA</small><span id="inst-kpi-collected">0</span></span>
           </div>
         </div>
-        <div class="kpi-card c-orange">
+        <div class="kpi-card c-orange" onclick="toggleInstallmentKpi('expected')" style="cursor:pointer">
           <div class="kpi-icon" style="background:#FFFAF0">⏳</div>
           <div class="kpi-label">الأقساط المتوقعة</div>
-          <div class="kpi-val"><small>DA</small><span id="inst-kpi-expected">0</span></div>
+          <div class="kpi-val">
+            <span id="inst-kpi-expected-hidden" style="display:none;letter-spacing:3px;font-size:16px">••••</span>
+            <span id="inst-kpi-expected-real"><small>DA</small><span id="inst-kpi-expected">0</span></span>
+          </div>
         </div>
-        <div class="kpi-card c-red">
+        <div class="kpi-card c-red" onclick="toggleInstallmentKpi('remaining')" style="cursor:pointer">
           <div class="kpi-icon" style="background:#FFF5F5">💸</div>
           <div class="kpi-label">المبالغ المتبقية</div>
-          <div class="kpi-val"><small>DA</small><span id="inst-kpi-remaining">0</span></div>
+          <div class="kpi-val">
+            <span id="inst-kpi-remaining-hidden" style="display:none;letter-spacing:3px;font-size:16px">••••</span>
+            <span id="inst-kpi-remaining-real"><small>DA</small><span id="inst-kpi-remaining">0</span></span>
+          </div>
         </div>
       </div>
 
@@ -596,7 +604,6 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-size:22px;font-weight:900;color:var(--text-dark)">سجل الضمان</div>
-          <div style="font-size:12px;color:var(--text-gray);margin-top:4px">كل عملية بيع من نافذة الضمان تُسجل هنا مع إمكانية الطباعة والتعديل والحذف</div>
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div class="srch-wrap" style="min-width:260px">
@@ -608,17 +615,26 @@
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px">
-        <div class="kpi-card c-blue" style="padding:16px">
+        <div class="kpi-card c-blue" style="padding:16px;cursor:pointer" onclick="toggleWarrantyKpi('count')">
           <div class="kpi-label">عدد وثائق الضمان</div>
-          <div class="kpi-val" id="warranty-kpi-count">0</div>
+          <div class="kpi-val">
+            <span id="warranty-kpi-count-hidden" style="display:none;letter-spacing:3px;font-size:16px">••••</span>
+            <span id="warranty-kpi-count-real"><span id="warranty-kpi-count">0</span></span>
+          </div>
         </div>
-        <div class="kpi-card c-green" style="padding:16px">
+        <div class="kpi-card c-green" style="padding:16px;cursor:pointer" onclick="toggleWarrantyKpi('total')">
           <div class="kpi-label">إجمالي مبيعات الضمان</div>
-          <div class="kpi-val"><small>DA</small><span id="warranty-kpi-total">0</span></div>
+          <div class="kpi-val">
+            <span id="warranty-kpi-total-hidden" style="display:none;letter-spacing:3px;font-size:16px">••••</span>
+            <span id="warranty-kpi-total-real"><small>DA</small><span id="warranty-kpi-total">0</span></span>
+          </div>
         </div>
-        <div class="kpi-card c-orange" style="padding:16px">
+        <div class="kpi-card c-orange" style="padding:16px;cursor:pointer" onclick="toggleWarrantyKpi('profit')">
           <div class="kpi-label">أرباح مبيعات الضمان</div>
-          <div class="kpi-val"><small>DA</small><span id="warranty-kpi-profit">0</span></div>
+          <div class="kpi-val">
+            <span id="warranty-kpi-profit-hidden" style="letter-spacing:3px;font-size:16px">••••</span>
+            <span id="warranty-kpi-profit-real" style="display:none"><small>DA</small><span id="warranty-kpi-profit">0</span></span>
+          </div>
         </div>
       </div>
 
@@ -672,7 +688,7 @@
       <div class="page-header">
         <div>
           <div class="page-title">🖥️ الكاشير</div>
-          <div class="page-sub">مسح المنتجات وإتمام البيع بسرعة</div>
+          <div class="page-sub"></div>
         </div>
       </div>
 
@@ -1006,12 +1022,12 @@
 <div id="dash-pwd-ov">
   <div class="pwd-box">
     <div class="pwd-icon">🔒</div>
-    <h3>لوحة التحكم</h3>
-    <p>هذه الصفحة خاصة بصاحب المحل فقط<br>أدخل كلمة المرور للمتابعة</p>
+    <h3 id="pwd-title">لوحة التحكم</h3>
+    <p id="pwd-message">هذه الصفحة خاصة بصاحب المحل فقط<br>أدخل كلمة المرور للمتابعة</p>
     <input type="password" class="pwd-input" id="pwd-input" placeholder="● ● ● ● ● ● ●" maxlength="20"/>
     <div class="pwd-error" id="pwd-error">❌ كلمة المرور غير صحيحة</div>
     <div class="pwd-btns">
-      <button class="btn btn-primary" style="flex:1" onclick="confirmPwd()">دخول</button>
+      <button class="btn btn-primary" style="flex:1" id="pwd-confirm-btn" onclick="confirmPwd()">دخول</button>
       <button class="btn btn-outline" style="flex:1" onclick="closePwd()">إلغاء</button>
     </div>
   </div>
@@ -1573,15 +1589,24 @@
     </div>
     <div class="fg">
       <label class="flabel">كلمة السر الحالية</label>
-      <input class="finput" type="password" id="cp-old" placeholder="أدخل كلمة السر الحالية">
+      <div style="position:relative">
+        <input class="finput" type="password" id="cp-old" placeholder="أدخل كلمة السر الحالية" style="padding-left:46px">
+        <button type="button" onclick="toggleDashboardPasswordField('cp-old', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:none;background:none;color:var(--text-gray);cursor:pointer;font-size:18px;padding:0 4px">👁️</button>
+      </div>
     </div>
     <div class="fg">
       <label class="flabel">كلمة السر الجديدة</label>
-      <input class="finput" type="password" id="cp-new" placeholder="أدخل كلمة السر الجديدة">
+      <div style="position:relative">
+        <input class="finput" type="password" id="cp-new" placeholder="أدخل كلمة السر الجديدة" style="padding-left:46px">
+        <button type="button" onclick="toggleDashboardPasswordField('cp-new', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:none;background:none;color:var(--text-gray);cursor:pointer;font-size:18px;padding:0 4px">👁️</button>
+      </div>
     </div>
     <div class="fg">
       <label class="flabel">تأكيد كلمة السر الجديدة</label>
-      <input class="finput" type="password" id="cp-confirm" placeholder="أعد إدخال كلمة السر الجديدة">
+      <div style="position:relative">
+        <input class="finput" type="password" id="cp-confirm" placeholder="أعد إدخال كلمة السر الجديدة" style="padding-left:46px">
+        <button type="button" onclick="toggleDashboardPasswordField('cp-confirm', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:none;background:none;color:var(--text-gray);cursor:pointer;font-size:18px;padding:0 4px">👁️</button>
+      </div>
     </div>
     <div id="cp-error" style="color:var(--red);font-size:12px;margin-bottom:10px;display:none"></div>
     <button class="btn btn-primary" style="width:100%;padding:13px;font-size:14px" onclick="saveNewPwd()">
